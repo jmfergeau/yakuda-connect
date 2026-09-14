@@ -50,6 +50,35 @@ def env(tmp_path, monkeypatch):
     for mod in (paths, vr_environment, backup_manager, vr_autotune):
         importlib.reload(mod)
 
+    # ------------------------------------------------------------------ #
+    #  Systemweite VR-Installationen aussperren
+    # ------------------------------------------------------------------ #
+    # HOME umzubiegen reicht NICHT. vr_environment sucht zusaetzlich in
+    # absoluten Systempfaden, die kein monkeypatch auf HOME erreicht:
+    #
+    #   WIVRN_OVR_SEARCH_PATH   beginnt mit /opt/xrizer
+    #   EXTRA_OVR_PATHS         enthaelt /usr/lib64/xrizer & Co.
+    #   find_wivrn_manifest()   findet /usr/share/openxr/1/openxr_wivrn.json
+    #                           und faellt notfalls genau darauf zurueck
+    #
+    # Auf einem Entwicklerrechner MIT installiertem xrizer und WiVRn fand
+    # die Automatik deshalb die echte Installation statt der hier
+    # angelegten Attrappe: 'no_xrizer' wurde zu 'already_xrizer', und die
+    # Umschaltung zeigte auf /opt/xrizer statt ins Test-HOME. Die Tests
+    # waren damit nicht falsch, sondern nur auf einer sauberen Maschine
+    # aussagekraeftig — also genau dort blind, wo entwickelt wird.
+    #
+    # Gesucht wird jetzt ausschliesslich unterhalb des Test-HOME.
+    monkeypatch.setattr(vr_environment, "WIVRN_OVR_SEARCH_PATH", ())
+    monkeypatch.setattr(vr_environment, "EXTRA_OVR_PATHS", tuple(
+        p for p in vr_environment.EXTRA_OVR_PATHS if p.startswith(str(home))))
+    # Als Funktion ersetzt, nicht als Kandidatenliste: find_wivrn_manifest()
+    # faellt ohne Treffer auf den Arch-Systempfad zurueck, und der existiert
+    # auf einem VR-Rechner. Der Test braucht einen Pfad, der nur dann da ist,
+    # wenn der Test ihn selbst angelegt hat.
+    fake_manifest = str(home / ".local/share/openxr/1/openxr_wivrn.json")
+    monkeypatch.setattr(vr_environment, "find_wivrn_manifest", lambda: fake_manifest)
+
     # Backups im Test nicht wirklich anlegen (kopiert sonst Systemordner).
     monkeypatch.setattr(vr_autotune.backup, "auto_backup_on_start", lambda: False)
     monkeypatch.setattr(vr_autotune.backup, "has_backup_flag", lambda: True)

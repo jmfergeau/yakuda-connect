@@ -10,7 +10,7 @@ import platform
 import time
 from PySide6.QtWidgets import (QApplication, QMainWindow, QLabel, QMessageBox,
                                QHBoxLayout, QVBoxLayout, QComboBox, QLineEdit,
-                               QPushButton, QFileDialog, QWidget)
+                               QPushButton, QFileDialog, QWidget, QCompleter)
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import (QDesktopServices)
 
@@ -43,7 +43,7 @@ import webbrowser
 # scripts/bump_version.py haelt sie automatisch mit core/version.py gleich,
 # und der Smoke-Test bricht ab, falls beide auseinanderlaufen oder das Muster
 # mehr als einmal vorkommt.
-APP_VERSION = "v1.2.6"
+APP_VERSION = "v1.2.7"
 
 # Community-Links (Settings -> "Community & Updates")
 DISCORD_URL = "https://discord.gg/X5TaN4A47h"
@@ -105,12 +105,17 @@ from programs import (INSTALL_PACKAGES, INSTALL_DNF, INSTALL_DNF_COPR,
                       WIVRN_FLATPAK_ID,
                       component_sources, dnf_copr_groups, dnf_copr_for_package,
                       TOOLS_APPS, TOOLS_OSC)
+# Zusaetzlich das Modul selbst: programs.all_tools() liest die aktuellen
+# Listen. Die "from ... import"-Namen oben sind Momentaufnahmen vom
+# Programmstart und wuerden ein reload_tools_config() nicht mitbekommen.
+import programs
 import games as games_db
 import openxr_manager as oxr
 import overlay_manager as ovl
 import paths
 import proc
 import firewall as fw
+import netbuffers as nbuf
 import advanced_info as adv
 from jsonio import update_json
 import version as version_mod
@@ -1318,6 +1323,12 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         self.ui.toggle_server.toggled.connect(self.on_server_toggled)
         self.ui.btn_server_check.clicked.connect(self.manual_server_check)
         self.ui.btn_port_status.clicked.connect(self.open_port_9757_firewall)
+        self.ui.btn_netbuffers.clicked.connect(self.fix_network_buffers)
+        # Ist der Fix schon aktiv UND ueberlebt er einen Neustart, soll der
+        # Knopf das beim Start zeigen — sonst klickt man ihn jedes Mal neu,
+        # nur um 'ist schon gesetzt' zu lesen.
+        if nbuf.is_applied() and nbuf.is_persistent():
+            self._mark_netbuffers_done()
         # Sprung ins Einstellungen-Unterregister "VR & OpenXR"
         self.ui.btn_openxr_shortcut.clicked.connect(self.open_vr_settings)
         self.ui.combo_language.currentIndexChanged.connect(self.on_language_changed)
@@ -1365,6 +1376,9 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
             )
             self._populate_method_combo(card)
         self.ui.btn_tools_check.clicked.connect(self.start_tools_update_check)
+        # Filterleiste erst hier aufbauen: sie liest die Kategorien aus den
+        # fertig angelegten Karten.
+        self.setup_tools_filter()
 
         # Settings Tab
         # HINWEIS: btn_vrchat_symlink wird NICHT mehr hier verbunden — der
@@ -1540,6 +1554,13 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         # Status-Label der OpenXR-Box neu setzen
         self.refresh_openxr_status()
 
+        # retranslate_ui() setzt die Dashboard-Knoepfe auf ihre Ruhe-
+        # beschriftung zurueck. Beim Netzwerkpuffer-Knopf stuende danach
+        # der Ruhetext auf gruenem 'erledigt'-Grund — also den Zustand
+        # nach dem Uebersetzen erneut setzen.
+        if nbuf.is_applied() and nbuf.is_persistent():
+            self._mark_netbuffers_done()
+
         # USB-Ampel + Raten-Hinweis stehen in der alten Sprache da — der
         # zuletzt erkannte Zustand wird einfach neu gezeichnet (kein neuer
         # Scan noetig).
@@ -1572,6 +1593,25 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
             if card.get("lbl_note") is not None:
                 note = tool.get("note_eng", tool.get("note", "")) if lang == "en" else tool.get("note", "")
                 card["lbl_note"].setText(note)
+        # Filter-Beschriftungen neu setzen. Die getroffene Auswahl wird ueber
+        # currentData gerettet und danach wiederhergestellt — sonst springt
+        # ein Sprachwechsel die Liste zurueck auf "Alle".
+        if hasattr(self.ui, "tools_search"):
+            prev_cat = self.ui.tools_filter_category.currentData()
+            prev_st  = self.ui.tools_filter_status.currentData()
+            self.ui.tools_search.setPlaceholderText(tr("tools_search_placeholder"))
+            try:
+                self.ui.tools_search.textChanged.disconnect(self.apply_tools_filter)
+                self.ui.tools_filter_category.currentIndexChanged.disconnect(self.apply_tools_filter)
+                self.ui.tools_filter_status.currentIndexChanged.disconnect(self.apply_tools_filter)
+            except (TypeError, RuntimeError):
+                pass
+            self.setup_tools_filter()
+            for combo, prev in ((self.ui.tools_filter_category, prev_cat),
+                                (self.ui.tools_filter_status, prev_st)):
+                idx = combo.findData(prev)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
         self.check_tools_status()
 
     def _get_pictures_dir(self):
@@ -2552,6 +2592,71 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         self.check_system_packages()
         if not self.are_critical_packages_missing(): self.ui.sidebar.setCurrentRow(1)
 
+    def fix_network_buffers(self):
+        """Hebt die UDP-Socket-Puffer an, damit WiVRn keine Frames verliert.
+
+        Reicht der Kernel-Puffer nicht fuer einen Videoframe, verwirft der
+        Kernel Pakete, bevor WiVRn sie sieht — das ist das Ruckeln, um das
+        es hier geht. Der Nutzer entscheidet selbst, ob das nur fuer diese
+        Sitzung oder dauerhaft gelten soll: die dauerhafte Variante legt
+        eine Datei unter /etc/sysctl.d/ an, und das gehoert gefragt und
+        nicht nebenbei gemacht.
+        """
+        vals = nbuf.current()
+        cur = ", ".join(
+            f"{k.split('.')[-1]} = {v if v is not None else '?'}"
+            for k, v in vals.items())
+
+        # Schon hoch genug? Dann nicht nach dem Passwort fragen. Es sei
+        # denn, es haelt nur bis zum Neustart — dann ist das Angebot, es
+        # festzuschreiben, echte Hilfe.
+        if nbuf.is_applied() and nbuf.is_persistent():
+            self._mark_netbuffers_done()
+            QMessageBox.information(
+                self, tr("success"),
+                tr("netbuffers_already_text").format(target=nbuf.TARGET, current=cur))
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("netbuffers_title"))
+        box.setIcon(QMessageBox.Question)
+        box.setText(tr("netbuffers_ask_text").format(
+            target=nbuf.TARGET, current=cur, path=nbuf.SYSCTL_FILE))
+        btn_perm = box.addButton(tr("netbuffers_permanent"), QMessageBox.AcceptRole)
+        btn_sess = box.addButton(tr("netbuffers_session"), QMessageBox.ActionRole)
+        box.addButton(tr("cancel"), QMessageBox.RejectRole)
+        box.setDefaultButton(btn_perm)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked not in (btn_perm, btn_sess):
+            return
+        permanent = clicked is btn_perm
+
+        ok, err = nbuf.apply(permanent)
+        if ok:
+            self._mark_netbuffers_done()
+            key = "netbuffers_ok_permanent" if permanent else "netbuffers_ok_session"
+            QMessageBox.information(self, tr("success"),
+                                    tr(key).format(target=nbuf.TARGET,
+                                                   path=nbuf.SYSCTL_FILE))
+            return
+
+        # Gescheitert (kein pkexec, Dialog abgebrochen, polkit verbietet es):
+        # die Befehle zum Selbstausfuehren zeigen, statt den Nutzer mit einer
+        # Fehlernummer stehenzulassen.
+        self._show_commands_dialog(
+            tr("netbuffers_title"),
+            tr("netbuffers_fail_text").format(err=err),
+            nbuf.manual_commands(permanent))
+
+    def _mark_netbuffers_done(self):
+        """Knopf im Dashboard auf 'erledigt' setzen."""
+        self.ui.btn_netbuffers.setText(tr_amp("netbuffers_btn_done"))
+        self.ui.btn_netbuffers.setStyleSheet(self.ui._CSS_FIREWALL_DONE)
+        if getattr(self.ui, "btn_netbuffers_info", None) is not None:
+            self.ui.btn_netbuffers_info.setStyleSheet(self.ui._CSS_INFO_ON_DONE)
+
     def open_port_9757_firewall(self):
         """
         Gibt die von WiVRn benoetigten Ports frei — mit der Firewall, die auf
@@ -2610,31 +2715,32 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         # (ⓘ) im Knopf. Ein eigenes Stylesheet hier wuerde ihn verlieren und
         # die Beschriftung unter das Symbol schieben.
         self.ui.btn_port_status.setStyleSheet(self.ui._CSS_FIREWALL_DONE)
-        # Auf dem gruenen Grund braucht das Symbol eine dunkle Farbe, sonst
-        # steht Hellgrau auf Hellgruen.
-        self.ui.btn_firewall_info.setStyleSheet(
-            "QToolButton { color:#2e3440; background:transparent; border:none;"
-            " font-size:14px; padding:0; }"
-            " QToolButton:hover { color:#3b4252; }")
+        self.ui.btn_firewall_info.setStyleSheet(self.ui._CSS_INFO_ON_DONE)
 
-    def _show_firewall_commands(self, kind, intro):
-        """Zeigt die Befehle zum Selbst-Ausfuehren, mit Kopier-Knopf.
+    def _show_commands_dialog(self, title, intro, commands):
+        """Zeigt Befehle zum Selbst-Ausfuehren, mit Kopier-Knopf.
 
-        Ohne Kopier-Knopf tippt sie niemand fehlerfrei ab — und genau in
-        diesem Moment (Firewall haengt) ist der Nutzer ohnehin schon genervt.
+        Ohne Kopier-Knopf tippt sie niemand fehlerfrei ab — und in genau
+        diesem Moment (etwas hat nicht geklappt) ist der Nutzer ohnehin
+        schon genervt.
         """
-        commands = "\n".join(fw.manual_commands(kind))
+        text = "\n".join(commands)
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Warning)
-        box.setWindowTitle(tr("firewall_manual_title"))
+        box.setWindowTitle(title)
         box.setText(intro)
         box.setInformativeText(
-            "<pre style='font-family:monospace'>" + commands.replace("<", "&lt;") + "</pre>")
+            "<pre style='font-family:monospace'>" + text.replace("<", "&lt;") + "</pre>")
         btn_copy = box.addButton(tr("tools_copy"), QMessageBox.ActionRole)
         box.addButton(QMessageBox.Ok)
         box.exec()
         if box.clickedButton() is btn_copy:
-            QApplication.clipboard().setText(commands)
+            QApplication.clipboard().setText(text)
+
+    def _show_firewall_commands(self, kind, intro):
+        """Firewall-Variante — Inhalt kommt aus core/firewall.py."""
+        self._show_commands_dialog(tr("firewall_manual_title"), intro,
+                                   fw.manual_commands(kind))
 
     def update_autostart_fields(self):
         try:
@@ -2659,6 +2765,16 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
                 btn = QPushButton("Browse...")
                 btn.setFixedWidth(80)
 
+                # Autovervollstaendigung im CMD-Modus: alle ueber den
+                # Tools-Tab installierten Startbefehle plus was sonst im PATH
+                # liegt. Popup- statt Inline-Ergaenzung, weil Inline beim
+                # Tippen eigener Befehle staendig dazwischenfunkt.
+                completer = QCompleter(self._autostart_command_pool(), self)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchContains)
+                completer.setCompletionMode(QCompleter.PopupCompletion)
+                inp.setCompleter(completer)
+
                 # Debug-Checkbox
                 from PySide6.QtWidgets import QCheckBox
                 chk_debug = QCheckBox("Debug")
@@ -2666,10 +2782,12 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
                 chk_debug.setFixedWidth(65)
                 chk_debug.setStyleSheet("color: #ebcb8b; font-size: 11px;")
 
-                combo.currentTextChanged.connect(lambda text, le=inp, bb=btn: le.setReadOnly(False) if text == "Custom Path" else bb.setEnabled(False))
+                combo.currentTextChanged.connect(
+                    lambda text, le=inp, bb=btn: self._autostart_mode_changed(text, le, bb))
                 inp.textChanged.connect(self.trigger_auto_save)
                 chk_debug.stateChanged.connect(self.trigger_auto_save)
-                btn.clicked.connect(lambda checked, le=inp: self.browse_custom_app_for_row(le))
+                btn.clicked.connect(
+                    lambda checked, le=inp, cb=combo: self._autostart_browse(le, cb))
 
                 row_layout.addWidget(lbl)
                 row_layout.addWidget(combo)
@@ -2679,8 +2797,11 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
                 self.ui.autostart_container_layout.addLayout(row_layout)
                 self.autostart_rows.append({
                     "label": lbl, "combo": combo, "input": inp,
-                    "btn": btn, "chk_debug": chk_debug, "layout": row_layout
+                    "btn": btn, "chk_debug": chk_debug, "layout": row_layout,
+                    "completer": completer,
                 })
+                # Beschriftung/Zustand einmal passend zum Startmodus setzen.
+                self._autostart_mode_changed(combo.currentText(), inp, btn)
         elif target_count < current_count:
             for _ in range(current_count - target_count):
                 row = self.autostart_rows.pop()
@@ -2692,6 +2813,139 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
                 row['chk_debug'].deleteLater()
 
         if not self.ui.num_apps.signalsBlocked(): self.trigger_auto_save()
+
+    def _autostart_mode_changed(self, mode, line_edit, button):
+        """Schaltet eine Autostart-Zeile zwischen Pfad- und Befehlsmodus um.
+
+        Vorher stand hier ein einzeiliger Ausdruck, der nur eine Richtung
+        bediente: beim Wechsel auf CMD wurde der Knopf deaktiviert und beim
+        Zurueckwechseln nie wieder aktiv. Beide Richtungen muessen gesetzt
+        werden, sonst bleibt der Zustand haengen.
+        """
+        if mode == "CMD":
+            # Im Befehlsmodus fuehrt kein Dateidialog weiter — gesucht ist ein
+            # Startbefehl. Der Knopf listet stattdessen die installierten Tools.
+            button.setText(tr("autostart_apps_btn"))
+            button.setToolTip(tr("autostart_apps_tip"))
+        else:
+            button.setText(tr("autostart_browse_btn"))
+            button.setToolTip("")
+        button.setEnabled(True)
+        line_edit.setReadOnly(False)
+
+    def _autostart_command_pool(self):
+        """Vorschlaege fuer die Autovervollstaendigung im CMD-Modus.
+
+        Zuerst die Startbefehle der ueber den Tools-Tab installierten
+        Programme (das ist es, was hier in aller Regel gesucht wird),
+        danach der restliche PATH.
+        """
+        pool = [t["cmd"] for t in self._installed_tool_commands()]
+        seen = set(pool)
+        for d in (os.environ.get("PATH") or "").split(os.pathsep):
+            if not d or not os.path.isdir(d):
+                continue
+            try:
+                names = os.listdir(d)
+            except Exception:
+                continue
+            for name in names:
+                if name in seen:
+                    continue
+                if os.access(os.path.join(d, name), os.X_OK):
+                    seen.add(name)
+                    pool.append(name)
+        return pool
+
+    def _installed_tool_commands(self):
+        """Alle installierten Werkzeuge aus dem Tools-Tab als (name, cmd).
+
+        Bewusst OHNE compute_status(): das ruft fuer AppImages
+        latest_version() auf und geht damit ins Netz. Hier wird nur geklickt,
+        um eine Liste zu sehen — ein Fenster, das erst nach dreizehn
+        GitHub-Abfragen aufgeht, waere unbrauchbar. Alle drei Pruefungen
+        unten sind rein lokal.
+        """
+        import shutil
+        import appimage_installer as ai
+
+        found = []
+        for tool in programs.all_tools():
+            cmd = (tool.get("start_cmd") or "").strip()
+            if not cmd:
+                continue
+            installed = False
+            try:
+                # 1. Ueber den Tools-Tab als AppImage installiert
+                #    (Symlink in ~/.local/bin + vorhandene AppImage-Datei).
+                installed = bool(ai.local_status(tool)[0])
+                # 2. Ueber Paketverwaltung installiert -> Befehl liegt im PATH.
+                if not installed:
+                    installed = bool(shutil.which(cmd.split()[0]))
+                # 3. Als Flatpak installiert.
+                if not installed and tool.get("flatpak_id"):
+                    installed = bool(ai.flatpak_app_installed(tool["flatpak_id"]))
+            except Exception as exc:
+                log.debug("Tool-Status %s nicht ermittelbar — %s", tool.get("key"), exc)
+            if installed:
+                args = (tool.get("launch_args") or "").strip()
+                found.append({
+                    "key":  tool.get("key", ""),
+                    "name": tool.get("name", tool.get("key", "")),
+                    "cmd":  f"{cmd} {args}".strip(),
+                })
+        found.sort(key=lambda t: t["name"].lower())
+        return found
+
+    def _autostart_browse(self, line_edit, combo):
+        """Knopf am Zeilenende — je nach Modus Dateidialog oder App-Auswahl."""
+        if combo.currentText() == "CMD":
+            self._autostart_pick_installed_app(line_edit)
+        else:
+            self.browse_custom_app_for_row(line_edit)
+
+    def _autostart_pick_installed_app(self, line_edit):
+        """Fenster mit allen installierten Tools/OSC-Apps zur Auswahl."""
+        from PySide6.QtWidgets import (QDialog, QListWidget, QListWidgetItem,
+                                       QDialogButtonBox, QVBoxLayout as QVBox)
+
+        tools = self._installed_tool_commands()
+        if not tools:
+            QMessageBox.information(self, tr("autostart_apps_title"),
+                                    tr("autostart_apps_none"))
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("autostart_apps_title"))
+        dlg.setMinimumWidth(420)
+        v = QVBox(dlg)
+
+        info = QLabel(tr("autostart_apps_hint"))
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #7b88a1; font-size: 11px;")
+        v.addWidget(info)
+
+        listw = QListWidget()
+        for t in tools:
+            item = QListWidgetItem(f"{t['name']}   —   {t['cmd']}")
+            item.setData(Qt.UserRole, t["cmd"])
+            listw.addItem(item)
+        listw.setCurrentRow(0)
+        # Doppelklick uebernimmt direkt — spart den Weg ueber OK.
+        listw.itemDoubleClicked.connect(lambda _i: dlg.accept())
+        v.addWidget(listw)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        v.addWidget(buttons)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+        item = listw.currentItem()
+        if item:
+            line_edit.setText(item.data(Qt.UserRole))
+            self.trigger_auto_save()
 
     def browse_custom_app_for_row(self, line_edit):
         file_path, _ = QFileDialog.getOpenFileName(self, tr("dlg_choose_program"), "/usr/bin", tr("dlg_all_files"))

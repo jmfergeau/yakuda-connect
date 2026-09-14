@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget,
                                QTextEdit, QFrame, QGridLayout,
                                QTabWidget, QToolButton, QPlainTextEdit,
                                QScrollArea, QSizePolicy, QApplication)
-from PySide6.QtCore import Qt, QPropertyAnimation, Property, QRectF
+from PySide6.QtCore import Qt, QPropertyAnimation, Property, QRectF, QSize
 from PySide6.QtGui import QPainter, QColor
 
 
@@ -479,6 +479,7 @@ class Ui_MainWindow:
         self.server_group.setTitle(tr("dashboard_server"))
         self.btn_server_check.setText(tr("dashboard_check"))
         self.btn_port_status.setText(tr_amp("dashboard_firewall"))
+        self.btn_netbuffers.setText(tr_amp("dashboard_netbuffers"))
         self.tracking_group.setTitle(tr_amp("dashboard_tracking"))
         self.check_usb_autoconnect.setText(tr("streaming_usb_autoconnect"))
         self.check_usb_autoconnect.setToolTip(tr("streaming_usb_autoconnect_tip"))
@@ -858,7 +859,17 @@ class Ui_MainWindow:
         self.btn_firewall_info = self._info_button(lambda: tr("firewall_info"))
         self.btn_port_status.attach_info(self.btn_firewall_info)
 
+        # Netzwerkpuffer-Fix. Steht bewusst hier und nicht in den
+        # Einstellungen: es ist dieselbe Sorte Problem wie die Firewall —
+        # eine Netzwerk-Voraussetzung fuers Streamen, kein Geschmacksregler.
+        # Und wer ruckelnde Bilder hat, sitzt genau auf dieser Seite.
+        self.btn_netbuffers = ButtonWithInfo(tr_amp("dashboard_netbuffers"))
+        self.btn_netbuffers.setStyleSheet(self._CSS_FIREWALL_IDLE)
+        self.btn_netbuffers_info = self._info_button(lambda: tr("netbuffers_info"))
+        self.btn_netbuffers.attach_info(self.btn_netbuffers_info)
+
         action_row.addWidget(self.btn_port_status)
+        action_row.addWidget(self.btn_netbuffers)
         action_row.addWidget(self.btn_server_check)
         action_row.addStretch()
         server_layout.addLayout(action_row)
@@ -1247,6 +1258,14 @@ class Ui_MainWindow:
         "QPushButton { background-color:#a3be8c; color:#2e3440; border:none;"
         f" font-weight:bold; border-radius:4px; padding:6px 12px 6px {ButtonWithInfo.PADDING_LEFT}px;"
         " margin-top:5px; }")
+    # Das (ⓘ) im Knopf braucht auf dem gruenen "erledigt"-Grund eine dunkle
+    # Farbe, sonst steht Hellgrau auf Hellgruen. Stand vorher als Literal in
+    # _mark_firewall_done; seit es zwei solche Knoepfe gibt (Firewall,
+    # Netzwerkpuffer), liegt es hier bei den anderen Stilen.
+    _CSS_INFO_ON_DONE = (
+        "QToolButton { color:#2e3440; background:transparent; border:none;"
+        " font-size:14px; padding:0; }"
+        " QToolButton:hover { color:#3b4252; }")
 
     def _settings_card(self):
         """Eine Karte (QFrame) im Nord-Card-Look. Gibt (frame, vbox) zurück."""
@@ -1699,6 +1718,45 @@ class Ui_MainWindow:
 
         self.tool_cards = {}
 
+        # ---- Filterleiste (Suche / Kategorie / Installationsstatus) ----
+        # Die Liste waechst mit jedem Release; ab etwa einem Dutzend Karten
+        # scrollt man mehr als man liest. Gefiltert wird ueber Sichtbarkeit
+        # der bestehenden Karten, nicht durch Neuaufbau: die Karten haengen
+        # an Signalen und am Status-Cache, ein Neubau wuerde beides wegwerfen.
+        from PySide6.QtWidgets import QComboBox as _QComboBox
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+
+        self.tools_search = QLineEdit()
+        self.tools_search.setPlaceholderText(tr("tools_search_placeholder"))
+        self.tools_search.setClearButtonEnabled(True)
+        self.tools_search.setStyleSheet("""
+            QLineEdit { background:#21252b; color:#d8dee9; border:1px solid #2e3440;
+                        border-radius:4px; padding:4px 8px; font-size:12px; }
+            QLineEdit:focus { border-color:#5e81ac; }
+        """)
+        filter_row.addWidget(self.tools_search, 1)
+
+        combo_css = """
+            QComboBox { background:#21252b; color:#d8dee9; border:1px solid #2e3440;
+                        border-radius:4px; padding:4px 8px; font-size:12px; }
+            QComboBox:hover { border-color:#5e81ac; }
+        """
+        self.tools_filter_category = _QComboBox()
+        self.tools_filter_category.setStyleSheet(combo_css)
+        self.tools_filter_category.setMinimumWidth(150)
+        filter_row.addWidget(self.tools_filter_category)
+
+        self.tools_filter_status = _QComboBox()
+        self.tools_filter_status.setStyleSheet(combo_css)
+        self.tools_filter_status.setMinimumWidth(150)
+        filter_row.addWidget(self.tools_filter_status)
+
+        self.lbl_tools_count = QLabel("")
+        self.lbl_tools_count.setStyleSheet("color:#7b88a1; font-size:11px;")
+        filter_row.addWidget(self.lbl_tools_count)
+        outer.addLayout(filter_row)
+
         # ---- Sub-Tab-Navigation (wie im Settings-Tab) ----
         self.tools_subtabs = QTabWidget()
         # Durchsichtig wie im Settings-Tab (gleicher Grund, siehe dort).
@@ -1717,18 +1775,32 @@ class Ui_MainWindow:
         # Seite 1: Anwendungen
         page_apps, apps_v = self._settings_new_page()
         for tool in TOOLS_APPS:
-            apps_v.addWidget(self._build_tool_card(tool))
+            apps_v.addWidget(self._build_tool_card(tool, page="apps"))
+        # Hinweis, wenn der Filter auf dieser Seite nichts uebrig laesst —
+        # sonst sieht der Nutzer eine leere Flaeche und haelt es fuer einen Fehler.
+        self.lbl_tools_empty_apps = QLabel(tr("tools_filter_empty"))
+        self.lbl_tools_empty_apps.setStyleSheet(
+            "color:#7b88a1; font-size:12px; font-style:italic; padding:16px;")
+        self.lbl_tools_empty_apps.setWordWrap(True)
+        self.lbl_tools_empty_apps.setVisible(False)
+        apps_v.addWidget(self.lbl_tools_empty_apps)
         apps_v.addStretch()
         self.tools_subtabs.addTab(page_apps, tr("tools_apps"))
 
         # Seite 2: OSC-Apps
         page_osc, osc_v = self._settings_new_page()
         for tool in TOOLS_OSC:
-            osc_v.addWidget(self._build_tool_card(tool))
+            osc_v.addWidget(self._build_tool_card(tool, page="osc"))
+        self.lbl_tools_empty_osc = QLabel(tr("tools_filter_empty"))
+        self.lbl_tools_empty_osc.setStyleSheet(
+            "color:#7b88a1; font-size:12px; font-style:italic; padding:16px;")
+        self.lbl_tools_empty_osc.setWordWrap(True)
+        self.lbl_tools_empty_osc.setVisible(False)
+        osc_v.addWidget(self.lbl_tools_empty_osc)
         osc_v.addStretch()
         self.tools_subtabs.addTab(page_osc, tr("tools_osc"))
 
-    def _build_tool_card(self, tool):
+    def _build_tool_card(self, tool, page="apps"):
         """Baut eine einzelne Tool-Karte — kompaktes Design."""
         from PySide6.QtWidgets import QFrame
 
@@ -1875,9 +1947,38 @@ class Ui_MainWindow:
         """)
         card_layout.addWidget(btn_install)
 
+        # Tools ohne jeden Installationsweg von hier aus (XR HOTAS: nur ueber
+        # cargo, VIVE Hub: nur als Tarball von HTC) bekommen statt des toten
+        # Install-Knopfes einen Knopf zum Repository. Der Hinweistext darueber
+        # nennt den echten Weg, und von dort kommt man mit einem Klick hin,
+        # statt die URL aus dem kleinen 🌐-Knopf fischen zu muessen.
+        btn_github = None
+        if not tool.get("install_methods", ["aur"]) and tool.get("link"):
+            btn_install.setVisible(False)
+            btn_github = QPushButton("  " + tr("tools_open_github"))
+            btn_github.setCursor(Qt.PointingHandCursor)
+            btn_github.setFixedHeight(26)
+            gh_icon = os.path.join(os.path.dirname(__file__), "..",
+                                   "assets", "github-mark.svg")
+            if os.path.exists(gh_icon):
+                from PySide6.QtGui import QIcon
+                btn_github.setIcon(QIcon(gh_icon))
+                btn_github.setIconSize(QSize(14, 14))
+            btn_github.setStyleSheet("""
+                QPushButton { background-color: #3b4252; color: #d8dee9; font-weight: bold;
+                              font-size: 11px; border-radius: 4px; border: 1px solid #4c566a; }
+                QPushButton:hover { background-color: #4c566a; border-color: #88c0d0; }
+            """)
+            btn_github.setToolTip(tool["link"])
+            btn_github.clicked.connect(lambda _, url=tool["link"]: self._open_url(url))
+            card_layout.addWidget(btn_github)
+
         self.tool_cards[tool["key"]] = {
             "pkg":          tool["pkg"],
             "tool":         tool,
+            "card":         card,
+            "page":         page,
+            "category":     tool.get("category", "misc"),
             "lbl_status":   lbl_status,
             "lbl_version":  lbl_version,
             "lbl_update":   lbl_update,

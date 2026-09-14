@@ -331,10 +331,17 @@ def available_aur_helpers():
 
 
 def supported_methods(tool):
-    """Abstrakte Methoden, die das Tool unterstützt – Teilmenge von {'appimage','aur'}."""
-    m = tool.get("install_methods")
-    if m:
-        return list(m)
+    """Abstrakte Methoden, die das Tool unterstützt – Teilmenge von {'appimage','aur'}.
+
+    Eine LEERE Liste ist eine Aussage ("dieses Tool ist von hier aus nicht
+    installierbar") und keine fehlende Angabe. Deshalb 'in tool' statt
+    'if m:' — sonst landen Tools wie XR HOTAS (nur ueber cargo) oder VIVE
+    Hub (nur als Tarball von HTC) in der AUR-Rueckfallzeile und bekaemen
+    einen Install-Knopf, der 'yay -S <paket>' auf ein nicht existierendes
+    Paket loslaesst. Solche Tools zeigen nur ihren note-Hinweis.
+    """
+    if "install_methods" in tool:
+        return list(tool.get("install_methods") or [])
     if tool.get("install_type") == "appimage" or tool.get("github_repo") or tool.get("appimage_url"):
         return ["appimage"]
     return ["aur"]

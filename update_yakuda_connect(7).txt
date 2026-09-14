@@ -1,0 +1,241 @@
+================================================================================
+ Update-Anleitung — Yakuda Connect
+================================================================================
+Projekt:  /home/yakuda/Schreibtisch/projects/Yakuda-connect/yakuda-connect/
+          (Git-Repo ist der INNERE Ordner yakuda-connect/)
+AUR-Repo: ~/aur/yakuda-connect          (eigenes Git-Repo, NICHT dasselbe)
+GitHub:   https://github.com/yakuda-stack/yakuda-connect
+
+Reihenfolge ist Pflicht: Version -> Testen -> GitHub -> Release -> AUR.
+Das AUR laedt den GitHub-Tag herunter. Wer vorzieht, bekommt 404.
+
+
+________________________________________________________________________________
+ 1. VERSION SETZEN
+________________________________________________________________________________
+
+cd ~/Schreibtisch/projects/Yakuda-connect/yakuda-connect
+
+python3 scripts/bump_version.py 1.2.8
+
+Das Skript pflegt DREI Stellen gleichzeitig:
+  core/version.py           VERSION = "1.2.8"        <- Quelle der Wahrheit
+  core/main.py              APP_VERSION = "v1.2.8"   <- Anker fuer alte Clients
+  packaging/aur/PKGBUILD    pkgver=1.2.8, pkgrel=1
+
+Die Zeile in core/main.py sieht nach Ueberbleibsel aus, ist aber Absicht:
+Der Update-Checker aller Clients bis v1.1.4 laedt core/main.py von GitHub und
+sucht darin per regulaerem Ausdruck nach genau dieser Zeile. Faellt sie weg,
+melden alle installierten Altversionen fuer immer "aktuell".
+
+VON HAND, das Skript macht das NICHT:
+
+  CHANGELOG.md              neuer Block "### 🚀 v1.2.8" GANZ OBEN
+                            mit "#### 🇩🇪 Deutsch" und "#### 🇬🇧 English"
+
+  config/games.json         "info": { "version": ..., "last_updated": ... }
+  config/tools.json         dito
+                            -> NUR anfassen, wenn sich die jeweilige Datei
+                               inhaltlich geaendert hat. Das sind DB-Versionen,
+                               keine App-Version; sie duerfen hinter der
+                               App-Version zurueckbleiben.
+
+Kontrolle:
+
+python3 scripts/bump_version.py --check --expect 1.2.8
+
+
+________________________________________________________________________________
+ 2. VORHER PRUEFEN
+________________________________________________________________________________
+
+__ Automatisch
+
+python3 -m pytest -q                            # 407 Tests, muessen alle gruen sein
+# Kein "tests" dahinter noetig — testpaths/pythonpath stehen in pyproject.toml.
+# "No module named pytest"?  ->  sudo pacman -S python-pytest
+# (pytest liegt unter den dev-Extras, nicht bei den Laufzeit-Abhaengigkeiten.)
+#
+# Seit v1.2.7 laufen die Tests auch auf einem Rechner MIT installiertem
+# xrizer/WiVRn durch. Vorher schlugen vier Autotune-Tests fehl, weil die
+# Fixture nur HOME isolierte und /opt/xrizer bzw. /usr/share/openxr
+# durchschlugen. Schlagen sie wieder fehl, ist es also ein echter Fehler
+# und kein Umgebungsproblem.
+
+python3 tests/smoke.py                          # startet die App headless
+desktop-file-validate yakuda-connect.desktop
+
+# Die .download-Datei lehnt desktop-file-validate allein wegen der Endung ab
+# ("filename does not have a .desktop extension"). Deshalb unter richtigem
+# Namen pruefen:
+cp yakuda-connect.desktop.download /tmp/ykc-check.desktop
+desktop-file-validate /tmp/ykc-check.desktop && rm /tmp/ykc-check.desktop
+
+# Bekannter Hinweis, KEIN Fehler und kein Grund, das Release aufzuhalten:
+#   Categories=Game;Utility;  ->  "more than one main category"
+# Folge: Der Eintrag kann in manchen Menues doppelt auftauchen. Wer es
+# aufraeumen will, nimmt eine Hauptkategorie plus Unterkategorien, z. B.
+#   Categories=Game;Utility;Settings;   ->   Categories=Utility;
+# (yakuda-connect.desktop macht es bereits so und laeuft fehlerfrei durch.)
+
+python3 -c "import json;[json.load(open(f)) for f in
+  ['config/games.json','config/tools.json','locales/de.json','locales/en.json']]"
+
+Sprachparitaet — jeder Schluessel muss in BEIDEN Dateien stehen, sonst bleiben
+Knoepfe in einer Sprache leer:
+
+python3 -c "
+import json
+de=json.load(open('locales/de.json')); en=json.load(open('locales/en.json'))
+d=sorted(set(de)^set(en)); print('Differenz:', d or 'keine')"
+
+__ Von Hand durchklicken
+
+python3 starter.py
+
+  Dashboard    Server-Schalter an/aus, Firewall-Knopf, Netzwerkpuffer-Knopf
+               (Dialog: dauerhaft / nur Sitzung / abbrechen)
+  Games        VRChat aufklappen: drei Proton-Slots sichtbar? Reihenfolge
+               Empfehlung -> Backup -> Sicher? Toggle "Natives Wayland" da?
+  Tools        Suchfeld tippen, Kategorie wechseln, Status auf "Installiert"
+               -> Zaehler rechts stimmt? Leer-Hinweis erscheint?
+  Autostart    Modus auf CMD -> Knopf heisst "Apps", Auswahlfenster oeffnet
+               sich, Doppelklick uebernimmt den Befehl
+  Sprache      auf English stellen und dieselben Stellen nochmal ansehen —
+               dabei faellt jeder fehlende Uebersetzungsschluessel auf
+  Schliessen   ueber die Taskleiste, nicht ueber das X
+
+__ Aufraeumen vor dem Commit
+
+rm -rf AppDir build pkg src .ruff_cache .pytest_cache
+find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+rm -f *.AppImage *.pkg.tar.zst *.tar.gz
+
+git status --short
+git ls-files | grep -E "AppDir|\.AppImage|^pkg/|^src/|__pycache__"   # muss leer sein
+
+
+________________________________________________________________________________
+ 3. AUF GITHUB VEROEFFENTLICHEN
+________________________________________________________________________________
+
+git status
+git add -A
+git commit -m "v1.2.8: <kurz, was drin ist>"
+git push origin main
+
+git tag -a v1.2.8 -m "v1.2.8"
+git push origin v1.2.8
+
+Tag-Format ist v<version> mit kleinem v — die PKGBUILD baut die Download-URL
+daraus zusammen. Ein Tag ohne v findet updpkgsums nicht.
+
+
+________________________________________________________________________________
+ 4. RELEASE-DATEIEN BAUEN
+________________________________________________________________________________
+
+__ AppImage
+
+bash build_appimage.sh
+# -> yakuda-connect-1.2.8-x86_64.AppImage   (im Projektordner)
+
+Kurz testen, am besten auf einem System ohne installiertes yakuda-connect:
+./yakuda-connect-1.2.8-x86_64.AppImage
+
+Faellt FUSE komplett aus (Container, gehaerteter Kernel):
+./yakuda-connect-1.2.8-x86_64.AppImage --appimage-extract-and-run
+
+__ Quell-Tarball
+
+cd ~/Schreibtisch/projects/Yakuda-connect
+tar --exclude='.git' --exclude='__pycache__' --exclude='AppDir' \
+    --exclude='.pytest_cache' --exclude='.ruff_cache' \
+    --exclude='pkg' --exclude='src' --exclude='*.AppImage' \
+    -czf ../yakuda-connect-v1.2.8.tar.gz yakuda-connect/
+cd yakuda-connect
+
+__ Hochladen
+
+Beide Dateien auf GitHub unter Releases an den Tag v1.2.8 haengen.
+Beschreibung = der deutsche + englische Changelog-Block dieser Version.
+KEIN Haken bei "pre-release" — sonst findet der Update-Checker der App das
+Release nicht.
+
+
+________________________________________________________________________________
+ 5. AUR AKTUALISIEREN
+________________________________________________________________________________
+
+Erst hier, nie frueher: updpkgsums laedt den GitHub-Tag herunter.
+
+__ PKGBUILD spiegeln
+
+cp ~/Schreibtisch/projects/Yakuda-connect/yakuda-connect/packaging/aur/PKGBUILD \
+   ~/aur/yakuda-connect/PKGBUILD
+
+__ Bauen und testen
+
+cd ~/aur/yakuda-connect
+sudo rm -rf pkg src
+rm -f *.pkg.tar.zst *.tar.gz          # sonst wird der alte Stand installiert
+
+updpkgsums                            # ersetzt sha256sums durch den echten Wert
+makepkg -si                           # Deps liegen alle in extra/
+                                      # (python, pyside6, python-setproctitle)
+
+cd ~ && yakuda-connect
+
+Beim Test: startet es? Icon im Menue? Prozessname in btop?
+Unten rechts muss v1.2.8 stehen — daran siehst du, ob wirklich der neue
+Stand installiert ist und nicht der alte aus dem Cache.
+
+__ Hochladen
+
+cd ~/aur/yakuda-connect
+makepkg --printsrcinfo > .SRCINFO     # PFLICHT nach JEDER PKGBUILD-Aenderung
+git add PKGBUILD .SRCINFO             # NIE git add -A
+git commit -m "Update to v1.2.8"
+git push origin master                # AUR nutzt master, das Projekt main
+
+
+________________________________________________________________________________
+ WENN ETWAS KLEMMT
+________________________________________________________________________________
+
+updpkgsums gibt 404
+  -> Der GitHub-Tag existiert noch nicht. Schritt 3 zuerst fertig machen.
+     Gegenpruefen: git ls-remote --tags origin | grep v1.2.8
+
+.SRCINFO vergessen
+  -> AUR lehnt den Push ab. makepkg --printsrcinfo > .SRCINFO, neu committen.
+
+Falscher Ordner
+  -> Der AUR-Push geht NUR aus ~/aur/yakuda-connect. Die PKGBUILD unter
+     packaging/aur/ im Projekt ist nur die Kopie zum Mitversionieren.
+     (Der Kommentarkopf der PKGBUILD nennt faelschlich ~/yakuda-connect —
+     beim naechsten Anfassen mitkorrigieren.)
+
+pkgver mit Bindestrich
+  -> 1.2.8 ist sauber, ein Alpha hiesse 1.2.8_alpha mit UNTERSTRICH.
+     bump_version.py weist einen Bindestrich von sich aus zurueck.
+
+Branch verwechselt
+  -> Projekt: git push origin main.  AUR: git push origin master.
+
+"ist aktuell -- ueberspringe Erstellen" / Berechtigungsfehler beim Bauen
+  -> Reste vom letzten Lauf: sudo rm -rf pkg src; rm -f *.pkg.tar.zst *.tar.gz
+
+Erfundene depends
+  -> Jeden neuen Paketnamen mit  pacman -Si <name>  pruefen.
+     Harte Abhaengigkeiten sind genau drei: python, pyside6,
+     python-setproctitle. Alles andere (pactl, adb, pkexec, git, yay,
+     flatpak, ...) sind externe PROGRAMME und gehoeren unter optdepends,
+     nicht unter depends und nicht in die pyproject.toml.
+
+Alte Clients melden kein Update
+  -> Steht APP_VERSION = "v<neu>" noch in core/main.py? Siehe Schritt 1.
+     Und: Release nicht als pre-release markiert?
+
+App startet nach dem AUR-Update mit alter Version
+  -> Alter Build im Cache. pkg/ und src/ loeschen, makepkg -si wiederholen.

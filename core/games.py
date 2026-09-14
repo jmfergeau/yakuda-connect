@@ -250,18 +250,39 @@ def _norm_desc(desc):
 
 
 def _proton_entry(pv_map, pd_map, key, role, desc=None, cachyos_only=False,
-                  hide_on_cachyos=False):
+                  hide_on_cachyos=False, meta=None):
     version = pv_map.get(key, key)
+    meta = meta or {}
     # Beschreibung: per-Spiel-Override (desc) hat Vorrang, sonst die zentrale
     # Standardbeschreibung der Proton-Version aus proton_descriptions.
     if not desc:
         desc = pd_map.get(key, "")
+
+    # ProtonPlus-Runner: ein EXPLIZITER Eintrag in proton_versions gewinnt,
+    # auch wenn er null ist. Deshalb "key in meta" statt meta.get(...) —
+    # null ("kommt nicht ueber ProtonPlus") und "nicht angegeben" (ableiten)
+    # sind zwei verschiedene Aussagen, die ein .get() zusammenwerfen wuerde.
+    # Ohne diese Unterscheidung bekaeme Proton-RTSP-Wayland-GE von
+    # _infer_protonplus_runner() faelschlich "proton-ge-rtsp" verpasst
+    # (der Name enthaelt "rtsp") und der Install-Knopf wuerde etwas ganz
+    # anderes installieren als die Karte verspricht.
+    if "protonplus_runner" in meta:
+        runner = meta.get("protonplus_runner")
+    else:
+        runner = _infer_protonplus_runner(version)
+
     entry = {
         "version": version,
         "role": role,
-        "protonplus_runner": _infer_protonplus_runner(version),
+        "protonplus_runner": runner,
         "desc": _norm_desc(desc),
     }
+    # Manuell installierbare Builds (nicht in AUR/ProtonPlus): Ordner-Praefix
+    # zum Erkennen + URLs fuer den Download-Knopf an der Karte.
+    for field in ("tool_prefix", "download_url", "checksum_url",
+                  "release_url", "manual"):
+        if meta.get(field):
+            entry[field] = meta[field]
     if cachyos_only:
         # Nur auf CachyOS anzeigen (Nicht-CachyOS sieht nur Default + Alternative).
         entry["cachyos_only"] = True
@@ -277,6 +298,12 @@ def build_games_from_config(cfg):
     pv_raw = cfg.get("proton_versions", {}) or {}
     pv = {k: (v if isinstance(v, str) else (v or {}).get("version", ""))
           for k, v in pv_raw.items()}
+    # Die dict-Form eines proton_versions-Eintrags darf ausser "version" noch
+    # Metadaten tragen (tool_prefix, protonplus_runner, download_url, ...).
+    # Die gehoeren an die VERSION, nicht ans Spiel: dieselbe Proton-Version
+    # wird bei mehreren Spielen eingetragen und muesste sonst mehrfach
+    # gepflegt werden.
+    pv_meta = {k: (v if isinstance(v, dict) else {}) for k, v in pv_raw.items()}
     # Zentrale Standardbeschreibungen der Proton-Versionen (per-Spiel überschreibbar).
     pd = cfg.get("proton_descriptions", {}) or {}
     # Zentrales Bild-Template ({appid} wird ersetzt); per-Spiel via "picture" überschreibbar.
@@ -297,22 +324,46 @@ def build_games_from_config(cfg):
 
         if p.get("cachyos"):
             protons.append(_proton_entry(pv, pd, p["cachyos"], "main_cachyos",
-                                         p.get("cachyos_desc"), cachyos_only=True))
+                                         p.get("cachyos_desc"), cachyos_only=True,
+                                         meta=pv_meta.get(p["cachyos"])))
         if p.get("default"):
             protons.append(_proton_entry(pv, pd, p["default"], "main",
                                          p.get("default_desc"),
-                                         hide_on_cachyos=same_on_cachyos))
+                                         hide_on_cachyos=same_on_cachyos,
+                                         meta=pv_meta.get(p["default"])))
+        # Die Alternative wird NUR ausgeblendet, wenn es fuer genau diesen
+        # Slot ein CachyOS-Gegenstueck gibt. Frueher stand hier
+        # bool(p.get("alternative_cachyos")) — was zufaellig richtig war,
+        # solange es nur einen Zusatz-Slot gab. Mit dem "safe"-Slot darunter
+        # waere es falsch geworden: ein safe_cachyos-Eintrag haette die
+        # Alternative auf CachyOS mit verschwinden lassen.
         if p.get("alternative"):
             protons.append(_proton_entry(pv, pd, p["alternative"], "alternative",
                                          p.get("alt_desc"),
-                                         hide_on_cachyos=bool(p.get("alternative_cachyos"))))
+                                         hide_on_cachyos=bool(p.get("alternative_cachyos")),
+                                         meta=pv_meta.get(p["alternative"])))
         # Optionale eigene Alternative fuer CachyOS: dort ist die
         # "Performance statt Kompatibilitaet"-Option proton-cachyos, nicht
         # Valves Proton. Ohne diesen Slot muesste man sich fuer einen der
         # beiden entscheiden und der jeweils andere Nutzerkreis saehe Unsinn.
         if p.get("alternative_cachyos"):
             protons.append(_proton_entry(pv, pd, p["alternative_cachyos"], "alternative",
-                                         p.get("alt_cachyos_desc"), cachyos_only=True))
+                                         p.get("alt_cachyos_desc"), cachyos_only=True,
+                                         meta=pv_meta.get(p["alternative_cachyos"])))
+        # Dritter Slot "safe": die risikoarme Wahl OHNE Video-/Codec-Extras.
+        # Bewusst getrennt von "alternative": bei VRChat ist die Alternative
+        # ein zweiter Medien-Build (RTSP), waehrend "safe" gerade der Verzicht
+        # darauf ist. Beide in einen Slot zu quetschen haette bedeutet, dem
+        # Nutzer zwei gegensaetzliche Empfehlungen unter einem Label zu zeigen.
+        if p.get("safe"):
+            protons.append(_proton_entry(pv, pd, p["safe"], "safe",
+                                         p.get("safe_desc"),
+                                         hide_on_cachyos=bool(p.get("safe_cachyos")),
+                                         meta=pv_meta.get(p["safe"])))
+        if p.get("safe_cachyos"):
+            protons.append(_proton_entry(pv, pd, p["safe_cachyos"], "safe",
+                                         p.get("safe_cachyos_desc"), cachyos_only=True,
+                                         meta=pv_meta.get(p["safe_cachyos"])))
 
         launch = {}
         if g.get("amd_start") or g.get("nvidia_start"):
@@ -332,6 +383,16 @@ def build_games_from_config(cfg):
             # Videoplayer scheitert. Standardmaessig aus, weil das Log bei
             # laengeren Sitzungen schnell dreistellige MB erreicht.
             toggles.append(game_toggle("proton_log", "PROTON_LOG=1",
+                                       position="before", default=False))
+        if g.get("toggle_proton_use_wayland"):
+            # Umgebungsvariable wie PROTON_LOG -> muss VOR %command% stehen.
+            # Schaltet den nativen Wayland-Pfad eines Proton-Builds ein, der
+            # ihn mitbringt (Proton-RTSP-Wayland-GE). Builds ohne die
+            # WineWayland-Patches ignorieren die Variable einfach, der
+            # Schalter kann dort also nichts kaputtmachen — er bringt nur
+            # nichts.
+            toggles.append(game_toggle("proton_use_wayland",
+                                       "PROTON_USE_WAYLAND=1",
                                        position="before", default=False))
         if g.get("toggle_vrcvideocacher"):
             # Startet VRCVideoCacher zusammen mit dem Spiel und beendet es
@@ -869,7 +930,12 @@ def visible_protons(game):
     protons = [p for p in game.get("protons", [])
                if not (cachy and p.get("hide_on_cachyos"))
                and not ((not cachy) and p.get("cachyos_only"))]
-    return sorted(protons, key=lambda p: 0 if p.get("role") == rec else 1)
+    # Empfehlung zuerst, danach feste Rollen-Reihenfolge: Alternative (Backup)
+    # vor "safe". Vorher entschied allein die Reihenfolge in der games.json,
+    # was bei mehreren Slots pro Rolle nicht mehr vorhersagbar ist.
+    order = {"main": 0, "main_cachyos": 0, "alternative": 1, "safe": 2}
+    return sorted(protons, key=lambda p: (0 if p.get("role") == rec else 1,
+                                          order.get(p.get("role"), 9)))
 
 
 def dynamic_protons():
@@ -1175,6 +1241,31 @@ def compat_tools_dirs():
     return dirs
 
 
+def compat_tools_install_dir():
+    """Das compatibilitytools.d, in das ein manueller Build entpackt wird.
+
+    Bewusst NICHT hartkodiert: auf CachyOS/Arch laeuft Steam fast immer
+    nativ (~/.local/share/Steam), bei Flatpak-Steam liegt es unter
+    ~/.var/app/com.valvesoftware.Steam/. steam_data_roots() kennt beide
+    Faelle und liefert die real existierenden zuerst. Existiert noch gar
+    kein compatibilitytools.d, wird es im ersten Steam-Datenverzeichnis
+    angelegt — Steam liest es beim naechsten Start.
+    """
+    existing = compat_tools_dirs()
+    if existing:
+        return existing[0]
+    roots = venv.steam_data_roots()
+    if not roots:
+        return None
+    target = os.path.join(roots[0], "compatibilitytools.d")
+    try:
+        os.makedirs(target, exist_ok=True)
+    except Exception as exc:
+        log.warning("compat_tools_install_dir: %s nicht anlegbar — %s", target, exc)
+        return None
+    return target
+
+
 def _natural_key(name):
     return tuple(int(n) for n in re.findall(r"\d+", name))
 
@@ -1186,15 +1277,30 @@ _TOOL_PREFIXES = {
     "proton-ge-rtsp": ["proton-rtsp", "GE-Proton-RTSP", "proton-ge-rtsp"],
 }
 
+# Praefixe, die trotz Treffer NICHT zum Runner gehoeren.
+# "Proton-RTSP-Wayland-GE-Beta3" faengt auf "proton-rtsp" an und wuerde sonst
+# als RTSP-Upstream-Build durchgehen. Hat jemand nur den Wayland-Fork
+# installiert, behauptete die RTSP-Karte dann "installiert" und ein Klick auf
+# "Use" traege den falschen Ordner in Steams CompatToolMapping ein.
+_TOOL_EXCLUDES = {
+    "proton-ge-rtsp": ["proton-rtsp-wayland"],
+}
+
 
 def installed_builds(proton):
     """Alle installierten Ordner in compatibilitytools.d, die zu diesem
     Proton-Eintrag gehoeren — neueste zuletzt. Leere Liste = nicht da."""
     runner = proton.get("protonplus_runner")
-    if runner is None:
-        return []
-    version = proton.get("version", "")
-    prefixes = _TOOL_PREFIXES.get(runner, [version])
+    # Ein explizites tool_prefix aus der games.json gewinnt: manuell
+    # installierte Builds (Proton-RTSP-Wayland-GE) haben gar keinen Runner,
+    # sind aber sehr wohl vorhanden und auswaehlbar.
+    prefixes = proton.get("tool_prefix") or []
+    if not prefixes:
+        if runner is None:
+            return []
+        version = proton.get("version", "")
+        prefixes = _TOOL_PREFIXES.get(runner, [version])
+    excludes = _TOOL_EXCLUDES.get(runner, []) if runner else []
     found = []
     for d in compat_tools_dirs():
         try:
@@ -1204,7 +1310,10 @@ def installed_builds(proton):
         for name in names:
             if not os.path.isdir(os.path.join(d, name)):
                 continue
-            if any(p and name.lower().startswith(p.lower()) for p in prefixes):
+            low = name.lower()
+            if any(x and low.startswith(x.lower()) for x in excludes):
+                continue
+            if any(p and low.startswith(p.lower()) for p in prefixes):
                 if name not in found:
                     found.append(name)
     found.sort(key=_natural_key)
@@ -1227,9 +1336,15 @@ def resolve_steam_tool(proton):
     damit nur noch als Hinweis, WELCHE Sorte gemeint ist.
     """
     runner = proton.get("protonplus_runner")
-    if runner is None:
+    if runner is None and not proton.get("tool_prefix"):
         # Valves Proton / "Proton 11 (Standard)": bringt Steam selbst mit ->
         # Mapping entfernen, Steam nutzt seinen Standard.
+        #
+        # ACHTUNG: die tool_prefix-Bedingung ist wesentlich. Manuell
+        # installierte Builds haben ebenfalls runner=None, sind aber ein
+        # echtes Compat-Tool. Ohne den Zusatz laege hier "Steam-Standard"
+        # und ein Klick auf "Use" wuerde VRChat still auf Stock-Proton
+        # zuruecksetzen, waehrend die Karte Wayland-GE anzeigt.
         return None, True, "steam_default"
 
     builds = installed_builds(proton)

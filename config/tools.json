@@ -1,0 +1,311 @@
+{
+  "info": {
+    "version": "1.2.7",
+    "last_updated": "2026-09-12"
+  },
+  "_comment": "Werkzeugliste des Tools-Tabs. Feldbedeutung siehe Kopf von core/programs.py. Eigene Eintraege gehoeren NICHT hier hinein, sondern in die Nutzerkopie unter ~/.config/yakuda-connect/config/tools.json — die wird zusaetzlich eingelesen und ueberlebt jedes App-Update.",
+  "apps": [
+    {
+      "key": "wayvr",
+      "name": "WayVR",
+      "pkg": "wayvr",
+      "desc": "Ein Desktop-Overlay für Wayland desktops mit integriertem Playspace Mover (wie XSOverlay).",
+      "desc_eng": "A desktop overlay for Wayland with integrated Playspace Mover (like XSOverlay).",
+      "start_cmd": "wayvr",
+      "link": "https://github.com/wayvr-org/wayvr",
+      "install_methods": [
+        "appimage",
+        "aur"
+      ],
+      "github_repo": "wayvr-org/wayvr",
+      "asset_match": "-x86_64.AppImage",
+      "include_prerelease": false,
+      "icon_url": "https://raw.githubusercontent.com/wayvr-org/wayvr/main/wayvr/wayvr.png",
+      "config_dirs": [
+        "wayvr"
+      ],
+      "category": "overlay"
+    },
+    {
+      "key": "vrcx",
+      "name": "VRCX",
+      "pkg": "vrcx",
+      "desc": "Freundschafts-Verwaltungstool für VRChat (basiert auf Electron).",
+      "desc_eng": "Friendship management tool for VRChat (built with Electron).",
+      "start_cmd": "vrcx",
+      "link": "https://github.com/vrcx-team/VRCX",
+      "install_methods": [
+        "appimage",
+        "aur"
+      ],
+      "github_repo": "vrcx-team/VRCX",
+      "asset_match": "_x64.AppImage",
+      "include_prerelease": false,
+      "config_dirs": [
+        "VRCX"
+      ],
+      "launch_args": "--no-install --no-desktop",
+      "icon_url": "https://raw.githubusercontent.com/vrcx-team/VRCX/master/images/VRCX.png",
+      "remove_entries": [
+        "~/.local/share/applications/VRCX.desktop",
+        "~/.config/autostart/VRCX.desktop"
+      ],
+      "category": "vrchat"
+    },
+    {
+      "key": "protonplus",
+      "name": "ProtonPlus",
+      "pkg": "protonplus",
+      "desc": "Damit viele Spiele gut und performance-freundlich laufen. Für VRChat ist Proton GE RTSP empfohlen.",
+      "desc_eng": "Helps many games run well and performance-friendly. Proton GE RTSP is recommended for VRChat.",
+      "start_cmd": "protonplus",
+      "link": "https://github.com/Vysp3r/ProtonPlus",
+      "install_methods": [
+        "aur",
+        "flatpak"
+      ],
+      "flatpak_id": "com.vysp3r.ProtonPlus",
+      "category": "system"
+    },
+    {
+      "key": "slimevr-bin",
+      "name": "SlimeVR FBT",
+      "pkg": "slimevr-bin",
+      "desc": "VR Full Body Tracking System.",
+      "desc_eng": "VR Full Body Tracking System.",
+      "start_cmd": "slimevr",
+      "link": "https://slimevr.dev/",
+      "install_methods": [
+        "aur",
+        "rpm",
+        "flatpak"
+      ],
+      "github_repo": "SlimeVR/SlimeVR-Server",
+      "rpm_asset_match": ".rpm",
+      "flatpak_id": "dev.slimevr.SlimeVR",
+      "category": "tracking"
+    },
+    {
+      "key": "unityhub",
+      "name": "Unity Hub (for Alcom)",
+      "pkg": "unityhub",
+      "desc": "Der offizielle Unity Hub – wird zwingend für die Nutzung von Alcom benötigt.",
+      "desc_eng": "The official Unity Hub — required for using Alcom.",
+      "start_cmd": "unityhub",
+      "link": "https://docs.unity.com/en-us/hub",
+      "install_methods": [
+        "aur",
+        "flatpak"
+      ],
+      "flatpak_id": "com.unity.UnityHub",
+      "category": "dev"
+    },
+    {
+      "key": "alcom",
+      "name": "Alcom (VRChat Creator Companion)",
+      "pkg": "alcom",
+      "desc": "Eine schnelle, quelloffene Alternative zum offiziellen VRChat Creator Companion (VCC).",
+      "desc_eng": "A fast, open-source alternative to the official VRChat Creator Companion (VCC).",
+      "start_cmd": "alcom",
+      "link": "https://vrc-get.anatawa12.com/de/alcom/",
+      "install_methods": [
+        "appimage",
+        "aur"
+      ],
+      "appimage_url": "https://github.com/vrc-get/vrc-get/releases/download/gui-v1.1.6/alcom-1.1.6-x86_64.AppImage",
+      "version": "1.1.6",
+      "category": "dev"
+    },
+    {
+      "key": "intiface-central",
+      "name": "Intiface Central",
+      "pkg": "intiface-central",
+      "desc": "Steuerzentrale für deine Toys. Kann alternativ auf dem Handy installiert werden: Handy-IP in OscGoesBrrr eintragen.",
+      "desc_eng": "Control hub for your toys. Can also run on your phone — just enter the phone IP in OscGoesBrrr.",
+      "start_cmd": "intiface-central",
+      "link": "https://intiface.com/#intiface-central",
+      "install_methods": [
+        "aur",
+        "flatpak"
+      ],
+      "flatpak_id": "com.nonpolynomial.intiface_central",
+      "category": "misc"
+    },
+    {
+      "key": "android-tools",
+      "name": "android-tools (ADB)",
+      "pkg": "android-tools",
+      "desc": "VR-App per Kabel auf dem Headset installieren (Android-basiert).",
+      "desc_eng": "Install VR apps directly on your headset via USB cable (Android-based).",
+      "start_cmd": "android-tools",
+      "link": "https://developer.android.com/tools?hl=de",
+      "install_methods": [
+        "appimage",
+        "aur"
+      ],
+      "appimage_url": "https://github.com/pkgforge-dev/android-tools-AppImage/releases/download/37.0.0%402026-06-22_1782134919/Android_Tools-37.0.0-anylinux-x86_64.AppImage",
+      "version": "37.0.0",
+      "category": "system"
+    },
+    {
+      "key": "spacecal-for-monado",
+      "name": "SpaceCal for Monado",
+      "pkg": "spacecal-for-monado",
+      "category": "tracking",
+      "desc": "Richtet VR-Geraete aus verschiedenen Tracking-Systemen ueber die Monado-Runtime in einen gemeinsamen Raum aus — z. B. Headset per WiVRn zusammen mit Lighthouse-Controllern oder Vive-Trackern. Kalibrieren, Boden setzen, neu zentrieren.",
+      "desc_eng": "Aligns VR devices from different tracking systems into one shared space through the Monado runtime — e.g. a WiVRn headset together with lighthouse controllers or Vive trackers. Calibrate, set floor, recenter.",
+      "start_cmd": "spacecal-for-monado",
+      "link": "https://github.com/99oblivius/spacecal-for-monado",
+      "install_methods": [
+        "aur"
+      ],
+      "note": "Braucht eine laufende Monado-basierte Runtime (WiVRn oder Monado). Nicht-Arch-Nutzer: .deb/.rpm aus dem GitHub-Release oder  nix run github:99oblivius/spacecal-for-monado",
+      "note_eng": "Requires a running Monado-based runtime (WiVRn or Monado). Non-Arch users: .deb/.rpm from the GitHub release, or  nix run github:99oblivius/spacecal-for-monado"
+    },
+    {
+      "key": "obah",
+      "name": "obah",
+      "pkg": "obah-git",
+      "category": "input",
+      "desc": "Terminal-Oberflaeche zum Bearbeiten von OpenVR-Bindings fuer xrizer, VapoR und OpenComposite — statt die JSON-Dateien von Hand zu schreiben. Findet Steam-Titel selbst; fuer Nicht-Steam-Titel den Spielordner uebergeben.",
+      "desc_eng": "Terminal UI for editing OpenVR bindings for xrizer, VapoR and OpenComposite instead of writing the JSON by hand. Finds Steam titles on its own; pass the game folder for non-Steam titles.",
+      "start_cmd": "obah",
+      "link": "https://github.com/galister/obah",
+      "install_methods": [
+        "aur"
+      ],
+      "note": "Laeuft im Terminal (TUI), nicht als Fenster — fuer Autostart daher wenig sinnvoll. Nicht-Arch-Nutzer:  cargo install obah  oder die portable Binary aus den Releases.",
+      "note_eng": "Runs in the terminal (TUI), not as a window — so it makes little sense for autostart. Non-Arch users:  cargo install obah  or the portable binary from Releases."
+    },
+    {
+      "key": "xr-hotas",
+      "name": "XR HOTAS",
+      "pkg": "xr-hotas",
+      "category": "input",
+      "desc": "Macht die VR-Controller zu Schubhebel und Joystick fuer Spiele, die keine Motion-Controller, aber Gamepads unterstuetzen (Elite: Dangerous, DCS World). Griff halten aktiviert die Achsen.",
+      "desc_eng": "Turns your VR motion controllers into throttle and joystick for games that support gamepads but not motion controllers (Elite: Dangerous, DCS World). Hold grip to activate the axes.",
+      "start_cmd": "xr-hotas",
+      "link": "https://github.com/galister/xr-hotas",
+      "install_methods": [],
+      "note": "Kein Paket und kein AppImage vorhanden — Installation nur ueber Cargo:  cargo install --git https://github.com/galister/xr-hotas.git   Danach liegt der Befehl unter ~/.cargo/bin/xr-hotas.",
+      "note_eng": "No package or AppImage available — install via Cargo only:  cargo install --git https://github.com/galister/xr-hotas.git   The command then lives at ~/.cargo/bin/xr-hotas."
+    },
+    {
+      "key": "vivehub-linux",
+      "name": "VIVE Hub for Linux (Beta)",
+      "pkg": "vivehub-linux",
+      "category": "tracking",
+      "desc": "HTCs Desktop-App fuer die VIVE Ultimate Tracker unter Linux: Tracker mit dem Dongle koppeln, Tracking-Map bauen, Posen ueber ein C++-SDK bereitstellen. Beta, kein HMD-Support.",
+      "desc_eng": "HTC's desktop app for VIVE Ultimate Trackers on Linux: pair trackers with the dongle, build the tracking map, expose poses through a C++ SDK. Beta, no HMD support.",
+      "start_cmd": "run-vivehub.sh",
+      "link": "https://github.com/ViveRoboticsSoftware/vivehub-linux",
+      "install_methods": [],
+      "note": "Nur als Tarball von HTC, daher nicht von hier installierbar: Release entpacken, einmalig  sudo ./install-udev.sh  ausfuehren, Dongle neu einstecken, dann mit  ./run-vivehub.sh  starten. Proprietaer (VIVE Product EULA), entwickelt auf Ubuntu.",
+      "note_eng": "Tarball from HTC only, so it cannot be installed from here: extract the release, run  sudo ./install-udev.sh  once, replug the dongle, then start it with  ./run-vivehub.sh . Proprietary (VIVE Product EULA), developed on Ubuntu."
+    }
+  ],
+  "osc": [
+    {
+      "key": "osc-dreamchatbox",
+      "name": "OSC-DreamChatbox",
+      "pkg": "osc-dreamchatbox",
+      "desc": "Native Linux-Alternative zu MagicChatbox (VRCOSC) – VRChat-OSC-Chatbox-Begleiter: Status-Rotation, Now-Playing, Hardware-Monitor, Speech-to-Text und OSCQuery.",
+      "desc_eng": "Native Linux alternative to MagicChatbox (VRCOSC) — VRChat OSC chatbox companion (status, now-playing, hardware, speech-to-text, OSCQuery).",
+      "start_cmd": "osc-dreamchatbox",
+      "link": "https://github.com/yakuda-stack/OSC-DreamChatbox",
+      "featured": true,
+      "install_methods": [
+        "appimage",
+        "aur"
+      ],
+      "github_repo": "yakuda-stack/OSC-DreamChatbox",
+      "asset_match": "-x86_64.AppImage",
+      "include_prerelease": true,
+      "icon_url": "https://raw.githubusercontent.com/yakuda-stack/OSC-DreamChatbox/main/assets/icon.png",
+      "config_dirs": [
+        "OSC-DreamChatbox"
+      ],
+      "category": "osc"
+    },
+    {
+      "key": "oscleash",
+      "name": "OSC Leash",
+      "pkg": "oscleash",
+      "desc": "OSC-Tool, um dich an einer virtuellen Leine hinterherzuziehen. Erfordert eine entsprechende Funktion im Avatar.",
+      "desc_eng": "OSC tool to pull you around on a virtual leash. Requires a compatible avatar setup.",
+      "start_cmd": "oscleash_app",
+      "link": "https://github.com/yakuda-stack/OSCLeash",
+      "install_methods": [
+        "appimage"
+      ],
+      "version": "2.2.0.1",
+      "appimage_url": "https://github.com/yakuda-stack/OSCLeash/releases/download/v2.2.0.1/OSCLeash-x86_64.AppImage",
+      "icon_url": "https://raw.githubusercontent.com/ZenithVal/OSCLeash/main/Resources/VRChatOSCLeash.png",
+      "config_dirs": [
+        "OSCLeash"
+      ],
+      "category": "osc"
+    },
+    {
+      "key": "oscgoesbrrr",
+      "name": "OSCGoesBrrr",
+      "pkg": "oscgoesbrrr",
+      "desc": "Echtes haptisches Feedback für VRChat. Unterstützt Lovense-Toys (kompatibel mit VRCFury).",
+      "desc_eng": "Real haptic feedback for VRChat. Supports Lovense toys (compatible with VRCFury).",
+      "start_cmd": "oscgoesbrrr",
+      "link": "https://github.com/OscToys/OscGoesBrrr/releases",
+      "install_methods": [
+        "appimage",
+        "aur",
+        "rpm"
+      ],
+      "github_repo": "OscToys/OscGoesBrrr",
+      "asset_match": ".AppImage",
+      "rpm_asset_match": ".rpm",
+      "include_prerelease": true,
+      "config_dirs": [
+        "OscGoesBrrr"
+      ],
+      "icon_url": "https://raw.githubusercontent.com/OscToys/OscGoesBrrr/main/src/icons/ogb-logo.png",
+      "category": "osc"
+    },
+    {
+      "key": "vrcft-avalonia",
+      "name": "VRCFaceTracking (Avalonia)",
+      "pkg": "vrcft-avalonia-bin",
+      "desc": "Cross-Plattform-Port von VRCFaceTracking (Avalonia/.NET) — die Brücke zwischen Face-/Eye-Tracking-Hardware und VRChat. Für Project Babble hier das VRCFT-Babble-Modul installieren.",
+      "desc_eng": "Cross-platform port of VRCFaceTracking (Avalonia/.NET) — the bridge between face/eye-tracking hardware and VRChat. For Project Babble, install the VRCFT-Babble module inside it.",
+      "start_cmd": "vrcft",
+      "link": "https://github.com/dfgHiatus/VRCFaceTracking.Avalonia",
+      "install_methods": [
+        "appimage",
+        "aur"
+      ],
+      "github_repo": "dfgHiatus/VRCFaceTracking.Avalonia",
+      "asset_match": ".AppImage",
+      "include_prerelease": false,
+      "config_dirs": [
+        "VRCFaceTracking"
+      ],
+      "category": "facetracking"
+    },
+    {
+      "key": "baballonia",
+      "name": "Project Babble (Baballonia)",
+      "pkg": "baballonia",
+      "desc": "Quelloffenes Eye-/Face-Tracking für Social VR (VRChat, Resonite, ChilloutVR). Füttert VRCFaceTracking über das VRCFT-Babble-Modul.",
+      "desc_eng": "Open-source eye/face tracking for social VR (VRChat, Resonite, ChilloutVR). Feeds VRCFaceTracking via the VRCFT-Babble module.",
+      "start_cmd": "baballonia",
+      "link": "https://github.com/Project-Babble/Baballonia",
+      "install_methods": [
+        "aur"
+      ],
+      "config_dirs": [
+        "Baballonia"
+      ],
+      "note": "Kein AppImage/Flatpak vorhanden. Nicht-Arch-Nutzer: Release-Tarball von GitHub entpacken und starten, oder per Nix:  nix run github:Project-Babble/Baballonia",
+      "note_eng": "No AppImage/Flatpak available. Non-Arch users: download & extract the release tarball from GitHub, or run via Nix:  nix run github:Project-Babble/Baballonia",
+      "category": "facetracking"
+    }
+  ]
+}

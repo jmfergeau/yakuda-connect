@@ -47,6 +47,13 @@ Hinweis zur Distro-Logik:
   Die WiVRn-Runtime im Installations-Tab wird ausschließlich nativ
   installiert (Arch: AUR, Fedora: dnf, Ubuntu: Anleitung zum Selbstbauen).
 """
+import json
+import os
+
+import paths
+from logging_setup import get_logger
+
+log = get_logger("programs")
 
 INSTALL_PACKAGES = {
     "WiVRn / Monado": ["wivrn-server", "lib32-wivrn-server"],
@@ -275,228 +282,82 @@ def dnf_copr_for_package(pkg):
             return cfg["copr"]
     return None
 
-TOOLS_APPS = [
-    {
-        "key":          "wayvr",
-        "name":         "WayVR",
-        "pkg":          "wayvr",
-        "desc":         "Ein Desktop-Overlay für Wayland desktops mit integriertem Playspace Mover (wie XSOverlay).",
-        "desc_eng":     "A desktop overlay for Wayland with integrated Playspace Mover (like XSOverlay).",
-        "start_cmd":    "wayvr",
-        "link":         "https://github.com/wayvr-org/wayvr",
-        # AppImage / yay / paru — Vorauswahl AppImage
-        "install_methods": ["appimage", "aur"],
-        "github_repo":  "wayvr-org/wayvr",
-        "asset_match":  "-x86_64.AppImage",
-        "include_prerelease": False,
-        "icon_url":     "https://raw.githubusercontent.com/wayvr-org/wayvr/main/wayvr/wayvr.png",
-        "config_dirs":  ["wayvr"],
-    },
-    {
-        "key":          "vrcx",
-        "name":         "VRCX",
-        "pkg":          "vrcx",
-        "desc":         "Freundschafts-Verwaltungstool für VRChat (basiert auf Electron).",
-        "desc_eng":     "Friendship management tool for VRChat (built with Electron).",
-        "start_cmd":    "vrcx",
-        "link":         "https://github.com/vrcx-team/VRCX",
-        # AppImage / yay / paru — Vorauswahl AppImage
-        "install_methods": ["appimage", "aur"],
-        "github_repo":  "vrcx-team/VRCX",
-        "asset_match":  "_x64.AppImage",
-        "include_prerelease": False,
-        "config_dirs":  ["VRCX"],
-        # Verhindert, dass VRCX sich nach ~/Applications verschiebt / eigene .desktop anlegt
-        "launch_args":  "--no-install --no-desktop",
-        "icon_url":     "https://raw.githubusercontent.com/vrcx-team/VRCX/master/images/VRCX.png",
-        "remove_entries": [
-            "~/.local/share/applications/VRCX.desktop",
-            "~/.config/autostart/VRCX.desktop",
-        ],
-    },
-    {
-        "key":          "protonplus",
-        "name":         "ProtonPlus",
-        "pkg":          "protonplus",
-        "desc":         "Damit viele Spiele gut und performance-freundlich laufen. Für VRChat ist Proton GE RTSP empfohlen.",
-        "desc_eng":     "Helps many games run well and performance-friendly. Proton GE RTSP is recommended for VRChat.",
-        "start_cmd":    "protonplus",
-        "link":         "https://github.com/Vysp3r/ProtonPlus",
-        # yay / paru / Flatpak
-        "install_methods": ["aur", "flatpak"],
-        "flatpak_id":   "com.vysp3r.ProtonPlus",
-    },
-    {
-        "key":          "slimevr-bin",
-        "name":         "SlimeVR FBT",
-        "pkg":          "slimevr-bin",
-        "desc":         "VR Full Body Tracking System.",
-        "desc_eng":     "VR Full Body Tracking System.",
-        "start_cmd":    "slimevr",
-        "link":         "https://slimevr.dev/",
-        # AUR (Arch) / RPM aus dem GitHub-Release (Fedora) / Flathub (ueberall)
-        "install_methods": ["aur", "rpm", "flatpak"],
-        "github_repo":  "SlimeVR/SlimeVR-Server",
-        # ACHTUNG: im Release liegen SlimeVR-aarch64.rpm UND SlimeVR-amd64.rpm,
-        # das ARM-Paket zuerst. Das Muster bleibt deshalb bei ".rpm" — die
-        # Architektur waehlt _pick_appimage_asset() selbst aus, sonst laedt ein
-        # normaler PC das aarch64-Paket.
-        "rpm_asset_match": ".rpm",
-        "flatpak_id":   "dev.slimevr.SlimeVR",
-    },
-    {
-        "key":          "unityhub",
-        "name":         "Unity Hub (for Alcom)",
-        "pkg":          "unityhub",
-        "desc":         "Der offizielle Unity Hub – wird zwingend für die Nutzung von Alcom benötigt.",
-        "desc_eng":     "The official Unity Hub — required for using Alcom.",
-        "start_cmd":    "unityhub",
-        "link":         "https://docs.unity.com/en-us/hub",
-        # yay / paru / Flatpak
-        "install_methods": ["aur", "flatpak"],
-        "flatpak_id":   "com.unity.UnityHub",
-    },
-    {
-        "key":          "alcom",
-        "name":          "Alcom (VRChat Creator Companion)",
-        "pkg":          "alcom",
-        "desc":         "Eine schnelle, quelloffene Alternative zum offiziellen VRChat Creator Companion (VCC).",
-        "desc_eng":     "A fast, open-source alternative to the official VRChat Creator Companion (VCC).",
-        "start_cmd":    "alcom",
-        "link":         "https://vrc-get.anatawa12.com/de/alcom/",
-        # AppImage / yay / paru — feste URL, weil im Release zwei Projekte liegen (vrc-get + alcom)
-        "install_methods": ["appimage", "aur"],
-        "appimage_url": "https://github.com/vrc-get/vrc-get/releases/download/gui-v1.1.6/alcom-1.1.6-x86_64.AppImage",
-        "version":      "1.1.6",
-    },
-    {
-        "key":          "intiface-central",
-        "name":         "Intiface Central",
-        "pkg":          "intiface-central",
-        "desc":         "Steuerzentrale für deine Toys. Kann alternativ auf dem Handy installiert werden: Handy-IP in OscGoesBrrr eintragen.",
-        "desc_eng":     "Control hub for your toys. Can also run on your phone — just enter the phone IP in OscGoesBrrr.",
-        "start_cmd":    "intiface-central",
-        "link":         "https://intiface.com/#intiface-central",
-        # yay / paru / Flatpak
-        "install_methods": ["aur", "flatpak"],
-        "flatpak_id":   "com.nonpolynomial.intiface_central",
-    },
-    {
-        "key":          "android-tools",
-        "name":         "android-tools (ADB)",
-        "pkg":          "android-tools",
-        "desc":         "VR-App per Kabel auf dem Headset installieren (Android-basiert).",
-        "desc_eng":     "Install VR apps directly on your headset via USB cable (Android-based).",
-        "start_cmd":    "android-tools",
-        "link":         "https://developer.android.com/tools?hl=de",
-        # AppImage / yay / paru — feste URL (pkgforge AppImage-Build)
-        "install_methods": ["appimage", "aur"],
-        "appimage_url": "https://github.com/pkgforge-dev/android-tools-AppImage/releases/download/37.0.0%402026-06-22_1782134919/Android_Tools-37.0.0-anylinux-x86_64.AppImage",
-        "version":      "37.0.0",
-    },
-]
+# --------------------------------------------------------------------------- #
+#  Werkzeuglisten aus config/tools.json
+# --------------------------------------------------------------------------- #
+# Die Eintraege standen frueher als Python-Literale hier im Modul. Das hiess:
+# jedes neue Tool war eine Code-Aenderung, und wer sich ein eigenes eintragen
+# wollte, musste eine installierte .py-Datei editieren — beim naechsten Update
+# ueberschrieben.
+#
+# Jetzt gilt dieselbe Regel wie bei der Spieledatenbank:
+#   1. <App-Ordner>/config/tools.json              (mitgeliefert)
+#   2. ~/.config/yakuda-connect/config/tools.json  (eigene Ergaenzungen)
+# Beide werden gelesen und ADDIERT — die Nutzerdatei ersetzt die mitgelieferte
+# also nicht, sondern haengt an bzw. ueberschreibt gezielt einzelne Eintraege
+# ueber denselben "key". So bleiben eigene Tools ein App-Update lang bestehen,
+# ohne dass der Nutzer die kuratierte Liste mitpflegen muss.
+#
+# Der Aufbau der Felder ist unveraendert und im Modulkopf oben beschrieben.
 
-TOOLS_OSC = [
-    {
-        "key":          "osc-dreamchatbox",
-        "name":         "OSC-DreamChatbox",
-        "pkg":          "osc-dreamchatbox",
-        # Vom Autor dieses Projekts (yakuda-stack) — daher hervorgehoben.
-        "desc":         ("Native Linux-Alternative zu MagicChatbox (VRCOSC) – VRChat-OSC-Chatbox-Begleiter: "
-                         "Status-Rotation, Now-Playing, Hardware-Monitor, Speech-to-Text und OSCQuery."),
-        "desc_eng":     ("Native Linux alternative to MagicChatbox (VRCOSC) — VRChat OSC chatbox companion "
-                         "(status, now-playing, hardware, speech-to-text, OSCQuery)."),
-        "start_cmd":    "osc-dreamchatbox",
-        "link":         "https://github.com/yakuda-stack/OSC-DreamChatbox",
-        # Karte optisch hervorheben (Akzent-Rahmen + ★-Badge) — siehe _build_tool_card.
-        "featured":     True,
-        # AppImage / yay / paru — Vorauswahl AppImage
-        "install_methods": ["appimage", "aur"],
-        "github_repo":  "yakuda-stack/OSC-DreamChatbox",
-        "asset_match":  "-x86_64.AppImage",
-        # Releases sind (noch) alpha-getaggt — Prereleases mitberücksichtigen,
-        # damit der Update-Check auch künftige Alpha-Builds findet.
-        "include_prerelease": True,
-        "icon_url":     "https://raw.githubusercontent.com/yakuda-stack/OSC-DreamChatbox/main/assets/icon.png",
-        "config_dirs":  ["OSC-DreamChatbox"],
-    },
-    {
-        "key":          "oscleash",
-        "name":         "OSC Leash",
-        "pkg":          "oscleash",
-        "desc":         "OSC-Tool, um dich an einer virtuellen Leine hinterherzuziehen. Erfordert eine entsprechende Funktion im Avatar.",
-        "desc_eng":     "OSC tool to pull you around on a virtual leash. Requires a compatible avatar setup.",
-        "start_cmd":    "oscleash_app",
-        "link":         "https://github.com/yakuda-stack/OSCLeash",
-        # nur AppImage (feste URL)
-        "install_methods": ["appimage"],
-        "version":      "2.2.0.1",
-        "appimage_url": "https://github.com/yakuda-stack/OSCLeash/releases/download/v2.2.0.1/OSCLeash-x86_64.AppImage",
-        "icon_url":     "https://raw.githubusercontent.com/ZenithVal/OSCLeash/main/Resources/VRChatOSCLeash.png",
-        "config_dirs":  ["OSCLeash"],
-    },
-    {
-        "key":          "oscgoesbrrr",
-        "name":         "OSCGoesBrrr",
-        "pkg":          "oscgoesbrrr",
-        "desc":         "Echtes haptisches Feedback für VRChat. Unterstützt Lovense-Toys (kompatibel mit VRCFury).",
-        "desc_eng":     "Real haptic feedback for VRChat. Supports Lovense toys (compatible with VRCFury).",
-        "start_cmd":    "oscgoesbrrr",
-        "link":         "https://github.com/OscToys/OscGoesBrrr/releases",
-        # AppImage / yay / paru — Vorauswahl AppImage
-        "install_methods": ["appimage", "aur", "rpm"],
-        "github_repo":  "OscToys/OscGoesBrrr",
-        "asset_match":  ".AppImage",
-        "rpm_asset_match": ".rpm",
-        "include_prerelease": True,
-        "config_dirs":  ["OscGoesBrrr"],
-        "icon_url":     "https://raw.githubusercontent.com/OscToys/OscGoesBrrr/main/src/icons/ogb-logo.png",
-    },
-    {
-        "key":          "vrcft-avalonia",
-        "name":         "VRCFaceTracking (Avalonia)",
-        # AUR-Paket (openlfreak): "extracted AppImage version". Stellt den
-        # Befehl `vrcft` bereit — deshalb ist start_cmd auch für die AppImage-
-        # Methode "vrcft" (der Starter unter ~/.local/bin/vrcft).
-        "pkg":          "vrcft-avalonia-bin",
-        "desc":         ("Cross-Plattform-Port von VRCFaceTracking (Avalonia/.NET) — die Brücke zwischen "
-                         "Face-/Eye-Tracking-Hardware und VRChat. Für Project Babble hier das "
-                         "VRCFT-Babble-Modul installieren."),
-        "desc_eng":     ("Cross-platform port of VRCFaceTracking (Avalonia/.NET) — the bridge between "
-                         "face/eye-tracking hardware and VRChat. For Project Babble, install the "
-                         "VRCFT-Babble module inside it."),
-        "start_cmd":    "vrcft",
-        "link":         "https://github.com/dfgHiatus/VRCFaceTracking.Avalonia",
-        # AppImage (aus dem Release) / yay / paru — Vorauswahl AppImage.
-        "install_methods": ["appimage", "aur"],
-        "github_repo":  "dfgHiatus/VRCFaceTracking.Avalonia",
-        # Release enthält genau ein Linux-AppImage -> ".AppImage" trifft eindeutig.
-        "asset_match":  ".AppImage",
-        "include_prerelease": False,
-        "config_dirs":  ["VRCFaceTracking"],
-    },
-    {
-        "key":          "baballonia",
-        "name":         "Project Babble (Baballonia)",
-        # Nur AUR: Baballonia (Avalonia/.NET) liefert offiziell KEIN AppImage
-        # und kein Flatpak, sondern nur ein Release-Tarball bzw. Nix-Flake.
-        # Für Arch/CachyOS ist das AUR-Paket der saubere Weg; Nicht-Arch-
-        # Nutzer bekommen den Hinweis unten (note).
-        "pkg":          "baballonia",
-        "desc":         ("Quelloffenes Eye-/Face-Tracking für Social VR (VRChat, Resonite, ChilloutVR). "
-                         "Füttert VRCFaceTracking über das VRCFT-Babble-Modul."),
-        "desc_eng":     ("Open-source eye/face tracking for social VR (VRChat, Resonite, ChilloutVR). "
-                         "Feeds VRCFaceTracking via the VRCFT-Babble module."),
-        "start_cmd":    "baballonia",
-        "link":         "https://github.com/Project-Babble/Baballonia",
-        # Bewusst NUR AUR — es gibt kein AppImage/Flatpak.
-        "install_methods": ["aur"],
-        "config_dirs":  ["Baballonia"],
-        # Nicht-Arch-Nutzer sehen sonst nur "keine Methode verfügbar" — dieser
-        # Hinweis nennt die offiziellen Alternativen (Release-Tarball / Nix).
-        "note":         ("Kein AppImage/Flatpak vorhanden. Nicht-Arch-Nutzer: Release-Tarball von GitHub "
-                         "entpacken und starten, oder per Nix:  nix run github:Project-Babble/Baballonia"),
-        "note_eng":     ("No AppImage/Flatpak available. Non-Arch users: download & extract the release "
-                         "tarball from GitHub, or run via Nix:  nix run github:Project-Babble/Baballonia"),
-    },
-]
+APP_DIR           = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TOOLS_JSON_BUNDLED = os.path.join(APP_DIR, "config", "tools.json")
+TOOLS_JSON_USER    = paths.config_file("tools.json")
+
+
+def _read_tools_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        # Eine kaputte Nutzerdatei darf den Tools-Tab nicht leer lassen.
+        log.warning("tools.json nicht lesbar (%s) — %s", path, exc)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _merge_tools(base, extra):
+    """Haengt extra an base an; gleicher 'key' ersetzt den bestehenden Eintrag.
+
+    Ersetzen statt Anhaengen ist wichtig: wer einen mitgelieferten Eintrag
+    korrigieren will (andere AppImage-URL, anderer Startbefehl), soll ihn
+    ueberschreiben koennen und nicht dieselbe Karte zweimal sehen.
+    """
+    out = list(base)
+    index = {t.get("key"): i for i, t in enumerate(out) if isinstance(t, dict)}
+    for entry in extra:
+        if not isinstance(entry, dict) or not entry.get("key"):
+            continue
+        pos = index.get(entry["key"])
+        if pos is None:
+            index[entry["key"]] = len(out)
+            out.append(entry)
+        else:
+            out[pos] = entry
+    return out
+
+
+def load_tools_config():
+    """Liest die mitgelieferte tools.json und ergaenzt sie um die Nutzerkopie."""
+    bundled = _read_tools_json(TOOLS_JSON_BUNDLED)
+    user    = _read_tools_json(TOOLS_JSON_USER)
+    apps = _merge_tools(bundled.get("apps", []) or [], user.get("apps", []) or [])
+    osc  = _merge_tools(bundled.get("osc", [])  or [], user.get("osc", [])  or [])
+    return apps, osc
+
+
+TOOLS_APPS, TOOLS_OSC = load_tools_config()
+
+
+def reload_tools_config():
+    """Werkzeuglisten neu einlesen (nach dem Bearbeiten der Nutzerdatei)."""
+    global TOOLS_APPS, TOOLS_OSC
+    TOOLS_APPS, TOOLS_OSC = load_tools_config()
+    return TOOLS_APPS, TOOLS_OSC
+
+
+def all_tools():
+    """Alle Werkzeuge beider Seiten in einer Liste (Anwendungen + OSC)."""
+    return list(TOOLS_APPS) + list(TOOLS_OSC)

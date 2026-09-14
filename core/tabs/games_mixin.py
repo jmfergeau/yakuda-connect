@@ -29,6 +29,7 @@ from PySide6.QtGui import (QPixmap, QIcon, QPainter, QPolygonF, QColor,
 
 import games as games_db
 from install_worker import CoverDownloadWorker, GamesDbWorker
+from proton_manual_install import ManualProtonInstallWorker
 from translations import tr, get_language
 
 from logging_setup import get_logger
@@ -775,6 +776,7 @@ class GamesTabMixin:
             "main_cachyos": tr("games_role_cachyos"),
             "alternative": tr("games_role_alt"),
             "alternative_ge": tr("games_role_alt_ge"),
+            "safe": tr("games_role_safe"),
         }
 
         for proton in games_db.visible_protons(game):
@@ -855,7 +857,23 @@ class GamesTabMixin:
             head.addWidget(btn_copy_ver)
 
             runner_id = proton.get("protonplus_runner")
-            if runner_id and pp_available:
+            # Manuell verteilte Builds (weder AUR noch ProtonPlus): eigener
+            # Knopf, der Tarball laedt, Pruefsumme prueft und entpackt.
+            if proton.get("download_url"):
+                btn_dl = QPushButton(
+                    tr("games_manual_reinstall_btn") if _found
+                    else tr("games_manual_install_btn"))
+                btn_dl.setCursor(Qt.PointingHandCursor)
+                btn_dl.setStyleSheet("""
+                    QPushButton { background-color: #5e81ac; color: white; border: none;
+                                  font-weight: bold; padding: 3px 10px; border-radius: 4px; font-size: 11px; }
+                    QPushButton:hover { background-color: #81a1c1; }
+                    QPushButton:disabled { background-color: #3b4252; color: #7b88a1; }
+                """)
+                btn_dl.clicked.connect(
+                    lambda _, p=proton, b=btn_dl: self.start_manual_proton_install(p, b))
+                head.addWidget(btn_dl)
+            elif runner_id and pp_available:
                 btn_pp = QPushButton(tr("games_pp_install_btn"))
                 btn_pp.setCursor(Qt.PointingHandCursor)
                 btn_pp.setStyleSheet("""
@@ -875,7 +893,12 @@ class GamesTabMixin:
             lbl_desc.setWordWrap(True)
             row.addWidget(lbl_desc)
 
-            if runner_id is None:
+            if proton.get("download_url"):
+                lbl_src = QLabel(tr("games_manual_note"))
+                lbl_src.setStyleSheet("color: #7b88a1; font-size: 10px; font-style: italic; border: none;")
+                lbl_src.setWordWrap(True)
+                row.addWidget(lbl_src)
+            elif runner_id is None:
                 lbl_src = QLabel(tr("games_pp_steam_note"))
                 lbl_src.setStyleSheet("color: #7b88a1; font-size: 10px; font-style: italic; border: none;")
                 row.addWidget(lbl_src)
@@ -1410,6 +1433,57 @@ class GamesTabMixin:
 
     def _on_pp_install_done(self, ok):
         self.ui.lbl_games_status.setText(tr("games_pp_done") if ok else tr("games_pp_missing"))
+
+    def start_manual_proton_install(self, proton, button=None):
+        """Laedt einen manuell verteilten Proton-Build (Tarball vom Release).
+
+        Laeuft im Worker-Thread: der Download ist je nach Build ueber ein
+        Gigabyte gross und wuerde die Oberflaeche sonst einfrieren.
+        """
+        if getattr(self, "_manual_worker", None) and self._manual_worker.isRunning():
+            return
+        self._manual_btn = button
+        if button:
+            button.setEnabled(False)
+        self.ui.lbl_games_status.setText(tr("games_manual_downloading"))
+
+        self._manual_worker = ManualProtonInstallWorker(proton)
+        self._manual_worker.progress_signal.connect(self._on_manual_progress)
+        self._manual_worker.status_signal.connect(self._on_manual_status)
+        self._manual_worker.finished_signal.connect(self._on_manual_install_done)
+        self._manual_worker.start()
+
+    def _on_manual_progress(self, percent):
+        if percent >= 0:
+            self.ui.lbl_games_status.setText(
+                f"{tr('games_manual_downloading')} {percent}%")
+
+    def _on_manual_status(self, phase):
+        key = {"download": "games_manual_downloading",
+               "verify":   "games_manual_verifying",
+               "extract":  "games_manual_extracting"}.get(phase)
+        if key:
+            self.ui.lbl_games_status.setText(tr(key))
+
+    def _on_manual_install_done(self, ok, msg):
+        if getattr(self, "_manual_btn", None):
+            self._manual_btn.setEnabled(True)
+            self._manual_btn = None
+        if not ok:
+            self.ui.lbl_games_status.setText(tr("games_manual_failed").format(error=msg))
+            QMessageBox.warning(self, tr("games_manual_failed_title"),
+                                tr("games_manual_failed").format(error=msg))
+            return
+
+        self.ui.lbl_games_status.setText(tr("games_manual_done").format(tool=msg))
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("games_manual_done_title"))
+        box.setIcon(QMessageBox.Information)
+        box.setText(tr("games_manual_restart_steam").format(tool=msg))
+        box.exec()
+        # Panel neu aufbauen, damit die Karte den Build jetzt als installiert
+        # zeigt und "Use" auswaehlbar wird.
+        self._refresh_detail()
 
     def show_games_info(self):
         """Das kleine (i): erklärt, wo man in Steam Proton-Version und

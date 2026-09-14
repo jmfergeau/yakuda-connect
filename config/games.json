@@ -1,13 +1,28 @@
 {
   "info": {
-    "version": "1.2.5",
-    "last_updated": "2026-09-04"
+    "version": "1.2.7",
+    "last_updated": "2026-09-12"
   },
   "picture_template": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/header.jpg",
   "proton_versions": {
     "Pro11": "Proton 11",
     "Pro11GE": "Proton-GE",
-    "Pro11GERTSP": "proton-rtsp-11.0-20260703",
+    "Pro11WaylandGE": {
+      "version": "Proton-RTSP-Wayland-GE-Beta3",
+      "tool_prefix": [
+        "Proton-RTSP-Wayland-GE"
+      ],
+      "protonplus_runner": null,
+      "manual": true,
+      "download_url": "https://github.com/Go08er/Proton-RTSP-Wayland-GE/releases/download/v11.1.0-beta.3/Proton-RTSP-Wayland-GE-Beta3.tar.gz",
+      "checksum_url": "https://github.com/Go08er/Proton-RTSP-Wayland-GE/releases/download/v11.1.0-beta.3/Proton-RTSP-Wayland-GE-Beta3.tar.gz.sha512sum",
+      "release_url": "https://github.com/Go08er/Proton-RTSP-Wayland-GE/releases/tag/v11.1.0-beta.3"
+    },
+    "Pro11GERTSP": {
+      "version": "proton-rtsp-11.0-20260609-4",
+      "protonplus_runner": "proton-ge-rtsp",
+      "release_url": "https://github.com/SpookySkeletons/proton-rtsp/releases/tag/proton-rtsp-11.0-20260609-4"
+    },
     "CachyOSPro11": "proton-cachyos-11.0-20260703"
   },
   "proton_descriptions": {
@@ -20,12 +35,16 @@
       "en": "Proton-GE with extra media and audio codecs — helps with in-game video or audio issues."
     },
     "Pro11GERTSP": {
-      "de": "GE-Proton mit RTSP-Patches — bringt alle Videoplayer zum Laufen (v. a. für VRChat).",
-      "en": "GE-Proton with RTSP patches — makes all video players work (mainly for VRChat)."
+      "de": "RTSP-Proton mit MediaFoundation-Patches — bringt die VRChat-Videoplayer zum Laufen.",
+      "en": "RTSP Proton with MediaFoundation patches — makes the VRChat video players work."
     },
     "CachyOSPro11": {
       "de": "CachyOS-Proton-Build — beste Performance und Latenz auf CachyOS.",
       "en": "CachyOS Proton build — best performance and latency on CachyOS."
+    },
+    "Pro11WaylandGE": {
+      "de": "RTSP-Proton mit nativen Wayland-Patches aus Proton-GE — fuer KDE/GNOME unter Wayland zusammen mit WiVRn/xrizer. Nur manuell installierbar.",
+      "en": "RTSP Proton with native Wayland patches from Proton-GE — for KDE/GNOME on Wayland together with WiVRn/xrizer. Manual install only."
     }
   },
   "games": {
@@ -33,26 +52,32 @@
       "name": "VRChat",
       "toggle_enable_hardware_decoding": true,
       "toggle_gamemoderun": true,
+      "toggle_proton_use_wayland": true,
       "fixes": [
         "vrchat_pictures",
         "vrchat_videoplayer",
         "vrchat_check"
       ],
       "proton": {
-        "default": "Pro11GERTSP",
+        "default": "Pro11WaylandGE",
         "default_desc": {
-          "de": "Die sichere Wahl für Videoplayer: bringt zusätzliche MediaFoundation-Patches mit, die speziell für VRChat gebaut wurden. Etwas weniger Performance als proton-cachyos.",
-          "en": "The safe choice for video players: carries extra MediaFoundation patches built specifically for VRChat. Slightly less performance than proton-cachyos."
+          "de": "Haupt-Empfehlung: RTSP-Medienstack plus native Wayland-Unterstuetzung. Natives Wayland ist optional — dafuer PROTON_USE_WAYLAND=1 in die Startparameter setzen. Gibt es weder in der AUR noch in ProtonPlus; der Knopf an dieser Karte laedt und entpackt den Build direkt.",
+          "en": "Main recommendation: RTSP media stack plus native Wayland support. Native Wayland is opt-in — add PROTON_USE_WAYLAND=1 to the launch options. Not in the AUR or ProtonPlus; the button on this card downloads and extracts the build directly."
         },
-        "alternative": "Pro11",
+        "alternative": "Pro11GERTSP",
         "alt_desc": {
-          "de": "Valves Standard-Proton. Videoplayer funktionieren hier meist nicht.",
-          "en": "Valve's stock Proton. Video players usually don't work here."
+          "de": "Backup: der Upstream, von dem die Wayland-Variante abstammt. Gleicher Medienstack, aber ohne die Wayland-Patches — laeuft ueber XWayland. Nimm das, wenn Wayland-GE Aerger macht oder ein neuer Medien-Fix noch nicht im Fork angekommen ist.",
+          "en": "Backup: the upstream the Wayland variant derives from. Same media stack, but without the Wayland patches — runs on XWayland. Use this if Wayland-GE misbehaves or a new media fix hasn't reached the fork yet."
         },
-        "alternative_cachyos": "CachyOSPro11",
-        "alt_cachyos_desc": {
-          "de": "Beste Performance und Latenz auf CachyOS. Videoplayer funktionieren hier oft ebenfalls — wenn bei dir alles abspielt, gibt es keinen Grund zu wechseln. Der „Videoplayer Check“ sagt dir, ob es klappt.",
-          "en": "Best performance and latency on CachyOS. Video players often work here too — if everything plays for you, there's no reason to switch. The “Video Player Check” tells you whether it works."
+        "safe": "Pro11",
+        "safe_desc": {
+          "de": "Sichere Wahl ohne Extras: Steams eingebautes Proton 11. Maximale Stabilitaet, aber KEINE Video-Fixes — In-Game-Videoplayer bleiben hier meist schwarz oder stumm.",
+          "en": "Safe choice without extras: Steam's built-in Proton 11. Maximum stability, but NO video fixes — in-game video players usually stay black or silent here."
+        },
+        "safe_cachyos": "CachyOSPro11",
+        "safe_cachyos_desc": {
+          "de": "Sichere Wahl ohne Extras: der CachyOS-Proton-Build. Beste Performance und Latenz, aber ohne die RTSP-/MediaFoundation-Patches — Videoplayer koennen funktionieren, muessen aber nicht.",
+          "en": "Safe choice without extras: the CachyOS Proton build. Best performance and latency, but without the RTSP/MediaFoundation patches — video players may or may not work."
         }
       },
       "amd_start": "%command% --enable-avpro-in-proton --disable-amd-stutter-workaround",
@@ -99,7 +124,7 @@
         "alternative": "Pro11GE"
       },
       "amd_start": "OXR_NO_TEXTURE_SOURCE_ALPHA=1 %command%",
-      "nvidia_start": "OXR_NO_TEXTURE_SOURCE_ALPHA=1 %command%"      
+      "nvidia_start": "OXR_NO_TEXTURE_SOURCE_ALPHA=1 %command%"
     },
     "2472940": {
       "name": "Wanderer: The Fragments of Fate",

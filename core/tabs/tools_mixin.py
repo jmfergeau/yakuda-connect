@@ -19,7 +19,7 @@ import paths
 from appimage_installer import AppImageInstallWorker
 from install_worker import InstallWorker, RemoveWorker, RpmInstallWorker
 from jsonio import read_json, write_json_atomic
-from translations import tr
+from translations import tr, get_language
 
 from logging_setup import get_logger
 
@@ -52,6 +52,115 @@ class ToolsStatusWorker(QThread):
 class ToolsTabMixin:
     """Alles rund um den Tools-Tab. Wird von VRApp geerbt."""
 
+    # ------------------------------------------------------------------ #
+    #  Filter: Suche / Kategorie / Installationsstatus
+    # ------------------------------------------------------------------ #
+    # Reihenfolge der Status-Auswahl. Der interne Schluessel wird ueber
+    # QComboBox.currentData transportiert, damit ein Sprachwechsel die
+    # getroffene Auswahl nicht verliert (die Beschriftung aendert sich, die
+    # Daten nicht).
+    TOOL_STATUS_FILTERS = ("all", "installed", "missing", "update")
+
+    def setup_tools_filter(self):
+        """Fuellt die beiden Auswahlfelder und haengt die Signale an."""
+        ui = self.ui
+        if not hasattr(ui, "tools_search"):
+            return
+
+        # Kategorien kommen aus den Tools selbst, nicht aus einer festen
+        # Liste: ein neues Tool mit neuer Kategorie in der tools.json soll
+        # ohne Code-Aenderung im Filter auftauchen.
+        cats = sorted({c.get("category", "misc") for c in ui.tool_cards.values()})
+        ui.tools_filter_category.blockSignals(True)
+        ui.tools_filter_category.clear()
+        ui.tools_filter_category.addItem(tr("tools_cat_all"), "all")
+        for c in cats:
+            # Unbekannte Kategorien bekommen ihren Rohnamen statt eines
+            # leeren Eintrags — tr() liefert fuer fehlende Schluessel sonst
+            # nichts Brauchbares.
+            label = tr(f"tools_cat_{c}") or c
+            if label == f"tools_cat_{c}":
+                label = c
+            ui.tools_filter_category.addItem(label, c)
+        ui.tools_filter_category.blockSignals(False)
+
+        ui.tools_filter_status.blockSignals(True)
+        ui.tools_filter_status.clear()
+        for key in self.TOOL_STATUS_FILTERS:
+            ui.tools_filter_status.addItem(tr(f"tools_status_{key}"), key)
+        ui.tools_filter_status.blockSignals(False)
+
+        ui.tools_search.textChanged.connect(self.apply_tools_filter)
+        ui.tools_filter_category.currentIndexChanged.connect(self.apply_tools_filter)
+        ui.tools_filter_status.currentIndexChanged.connect(self.apply_tools_filter)
+        self.apply_tools_filter()
+
+    def _tool_install_state(self, card):
+        """'installed' | 'update' | 'missing' fuer eine Karte.
+
+        Gelesen wird der Status, den _render_tool_card zuletzt gesetzt hat.
+        Bewusst kein eigener Check: der wuerde bei jedem Tastendruck im
+        Suchfeld ueber alle Tools laufen.
+        """
+        st = card.get("status") or {}
+        installed = (st.get("appimage_installed") or st.get("pm_installed")
+                     or st.get("flatpak_installed"))
+        if not installed:
+            return "missing"
+        if st.get("appimage_has_update") or st.get("pm_has_update"):
+            return "update"
+        return "installed"
+
+    def apply_tools_filter(self):
+        """Blendet die Tool-Karten nach Suchtext, Kategorie und Status ein/aus."""
+        ui = self.ui
+        if not hasattr(ui, "tools_search"):
+            return
+        needle = ui.tools_search.text().strip().lower()
+        cat = ui.tools_filter_category.currentData() or "all"
+        want = ui.tools_filter_status.currentData() or "all"
+        lang = get_language()
+
+        visible = {"apps": 0, "osc": 0}
+        total = 0
+        for key, card in ui.tool_cards.items():
+            widget = card.get("card")
+            if widget is None:
+                continue
+            total += 1
+            tool = card.get("tool", {})
+
+            # Gesucht wird ueber Name, Schluessel, Paketname UND Beschreibung.
+            # Nur der Name waere zu wenig: wer "tracker" tippt, meint das
+            # Thema, nicht ein Tool, das zufaellig so heisst.
+            desc = tool.get("desc_eng", "") if lang == "en" else tool.get("desc", "")
+            haystack = " ".join([
+                str(tool.get("name", "")), str(key), str(tool.get("pkg", "")),
+                str(card.get("category", "")), str(desc),
+            ]).lower()
+
+            ok = (not needle or needle in haystack)
+            if ok and cat != "all":
+                ok = card.get("category", "misc") == cat
+            if ok and want != "all":
+                state = self._tool_install_state(card)
+                # "Installiert" schliesst Karten mit verfuegbarem Update ein —
+                # die sind ja installiert. "Update verfuegbar" ist die
+                # engere Auswahl darunter.
+                ok = (state in ("installed", "update")) if want == "installed" \
+                    else (state == want)
+
+            widget.setVisible(ok)
+            if ok:
+                visible[card.get("page", "apps")] = visible.get(card.get("page", "apps"), 0) + 1
+
+        shown = sum(visible.values())
+        ui.lbl_tools_count.setText(tr("tools_filter_count").format(shown=shown, total=total))
+        if hasattr(ui, "lbl_tools_empty_apps"):
+            ui.lbl_tools_empty_apps.setVisible(visible.get("apps", 0) == 0)
+        if hasattr(ui, "lbl_tools_empty_osc"):
+            ui.lbl_tools_empty_osc.setVisible(visible.get("osc", 0) == 0)
+
     def check_tools_status(self):
         """Lädt den Status aus dem Cache (programs.json) und zeigt ihn sofort an."""
         cache = self._load_programs_cache()
@@ -68,6 +177,10 @@ class ToolsTabMixin:
                 card["status"] = {}
             else:
                 self._render_tool_card(key, entry)
+        # Der Status-Filter arbeitet auf card["status"], das gerade neu
+        # gesetzt wurde — ohne diesen Aufruf zeigte "Nicht installiert"
+        # weiter den Stand von vor dem Cache-Laden.
+        self.apply_tools_filter()
 
     def _render_tool_card(self, key, status):
         """Zentrale UI-Logik einer Tool-Karte aus dem Status-Dict."""
@@ -171,6 +284,9 @@ class ToolsTabMixin:
         cache[key] = status
         self._save_programs_cache(cache)
         self._render_tool_card(key, status)
+        # Nach Installation/Entfernung kann die Karte aus dem aktiven
+        # Status-Filter herausfallen (oder neu hineinfallen).
+        self.apply_tools_filter()
 
     def start_tools_update_check(self):
         """Startet den echten Versions-Check im Hintergrund."""
