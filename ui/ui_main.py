@@ -500,6 +500,10 @@ class Ui_MainWindow:
         self.btn_autostart_kill.setText(tr("dashboard_autostart_kill"))
         self.btn_autostart_kill.setToolTip(tr("autostart_kill_tip"))
         self.headset_group.setTitle(tr("dashboard_headsets"))
+        self.btn_usb_repair.setText(tr("adb_fix_btn"))
+        self.btn_usb_repair.setToolTip(tr("adb_fix_tip"))
+        self.btn_connect_headset.setText(tr("dashboard_connect_btn"))
+        self.btn_connect_headset.setToolTip(tr("dashboard_connect_tip"))
         self.btn_refresh_list.setText(tr("dashboard_list_btn"))
         self.btn_remove_headset.setText(tr("dashboard_remove_btn"))
         self.btn_disconnect_headset.setText(tr("dashboard_disconnect"))
@@ -541,6 +545,8 @@ class Ui_MainWindow:
         self.lbl_apk_title.setText(tr("dashboard_apk_title"))
         self.apk_info_lbl.setText(tr("dashboard_apk_info"))
         self.btn_apk_install.setText(tr_amp("dashboard_apk_btn"))
+        self.btn_apk_download.setText(tr_amp("dashboard_apk_download_btn"))
+        self.btn_apk_download.setToolTip(tr("dashboard_apk_download_tip"))
         self.btn_apk_cancel.setText(tr("dashboard_apk_cancel"))
         self.lbl_apk_meta.setText(self._apk_meta_text())
         # Backup
@@ -569,6 +575,7 @@ class Ui_MainWindow:
         # Diagnose / Logdatei
         self.btn_log_open.setText(tr("diag_open_btn"))
         self.btn_log_copy.setText(tr("diag_copy_btn"))
+        self.btn_diag_copy.setText(tr("diag_report_btn"))
         self.btn_log_save.setText(tr("diag_save_btn"))
         self.lbl_log_hint.setText(tr("diag_hint"))
         # WayVR Design
@@ -719,6 +726,20 @@ class Ui_MainWindow:
             QPushButton:hover { background-color: #81a1c1; }
             QPushButton:disabled { background-color: #3b4252; color: #4c566a; }
         """)
+        # Zweiter Knopf: NUR herunterladen, nicht installieren. Fuer alle,
+        # die die APK per SideQuest aufspielen, sie auf einen USB-Stick legen
+        # oder schlicht kein USB-Debugging aktivieren wollen. Bewusst
+        # unauffaelliger gestylt als der Hauptknopf — der Normalfall bleibt
+        # "herunterladen UND installieren".
+        self.btn_apk_download = QPushButton(tr_amp("dashboard_apk_download_btn"))
+        self.btn_apk_download.setToolTip(tr("dashboard_apk_download_tip"))
+        self.btn_apk_download.setStyleSheet("""
+            QPushButton { background-color: #434c5e; color: #eceff4; font-weight: bold;
+                          padding: 7px 14px; border-radius: 4px; border: none; }
+            QPushButton:hover { background-color: #5e81ac; }
+            QPushButton:disabled { background-color: #3b4252; color: #4c566a; }
+        """)
+
         self.btn_apk_cancel = QPushButton(tr("dashboard_apk_cancel"))
         self.btn_apk_cancel.setVisible(False)
         self.btn_apk_cancel.setStyleSheet("""
@@ -727,6 +748,7 @@ class Ui_MainWindow:
             QPushButton:hover { background-color: #d08770; }
         """)
         apk_btn_row.addWidget(self.btn_apk_install)
+        apk_btn_row.addWidget(self.btn_apk_download)
         apk_btn_row.addWidget(self.btn_apk_cancel)
         apk_btn_row.addStretch()
         apk_box.addLayout(apk_btn_row)
@@ -735,6 +757,16 @@ class Ui_MainWindow:
         self.lbl_apk_status.setStyleSheet("color: #88c0d0; font-size: 11px;")
         self.lbl_apk_status.setWordWrap(True)
         apk_box.addWidget(self.lbl_apk_status)
+
+        # Eigene Zeile fuer die Versions-Warnung: sie muss stehen bleiben,
+        # waehrend die Statuszeile darueber im Sekundentakt weiterlaeuft.
+        # In derselben Zeile waere genau die wichtigste Meldung diejenige,
+        # die vom naechsten Fortschrittstext ueberschrieben wird.
+        self.lbl_apk_warn = QLabel("")
+        self.lbl_apk_warn.setStyleSheet("color: #ebcb8b; font-size: 11px; font-weight: bold;")
+        self.lbl_apk_warn.setWordWrap(True)
+        self.lbl_apk_warn.setVisible(False)
+        apk_box.addWidget(self.lbl_apk_warn)
 
         # --- Alternative fuer Meta-Nutzer --------------------------------
         # Der Weg per adb setzt USB-Debugging und einen Entwickler-Account
@@ -1044,12 +1076,29 @@ class Ui_MainWindow:
         """)
 
         right_btn_layout = QVBoxLayout()
+
+        # "Verbinden" steht ganz oben, weil es die haeufigste Handlung ist.
+        # Aktiv wird er nur, wenn eine Brille per adb erreichbar IST und der
+        # Server laeuft — main.py._update_connect_button() entscheidet das.
+        # Startzustand deshalb: aus. Ein Knopf, der sichtbar nichts tut, ist
+        # schlimmer als keiner.
+        self.btn_connect_headset = QPushButton(tr("dashboard_connect_btn"))
+        self.btn_connect_headset.setEnabled(False)
+        self.btn_connect_headset.setToolTip(tr("dashboard_connect_tip"))
+        self.btn_connect_headset.setStyleSheet("""
+            QPushButton { background-color: #a3be8c; border: none; color: #2e3440;
+                          font-weight: bold; }
+            QPushButton:hover { background-color: #b9d0a4; }
+            QPushButton:disabled { background-color: #3b4252; color: #4c566a; }
+        """)
+
         self.btn_refresh_list = QPushButton(tr("dashboard_list_btn"))
         self.btn_remove_headset = QPushButton(tr("dashboard_remove_btn"))
         self.btn_remove_headset.setStyleSheet("QPushButton { background-color: #bf616a; border: none; color: white; font-weight: bold; } QPushButton:hover { background-color: #d08770; }")
         self.btn_disconnect_headset = QPushButton(tr("dashboard_disconnect"))
         self.btn_disconnect_headset.setStyleSheet("QPushButton { background-color: #d08770; border: none; color: white; font-weight: bold; } QPushButton:hover { background-color: #ebcb8b; color: #2e3440; }")
 
+        right_btn_layout.addWidget(self.btn_connect_headset)
         right_btn_layout.addWidget(self.btn_refresh_list)
         right_btn_layout.addWidget(self.btn_remove_headset)
         right_btn_layout.addWidget(self.btn_disconnect_headset)
@@ -1067,8 +1116,23 @@ class Ui_MainWindow:
         self.lbl_usb_state = QLabel("")
         self.lbl_usb_state.setWordWrap(True)
         self.lbl_usb_state.setStyleSheet("color:#d8dee9; font-size:11px;")
+        # Reparatur-Knopf direkt in der Statuszeile: er erscheint nur, wenn
+        # adb klemmt (main.py._render_usb_state entscheidet das). Ein
+        # dauerhaft sichtbarer Knopf "adb reparieren" wuerde suggerieren,
+        # dass regelmaessig etwas zu reparieren ist.
+        self.btn_usb_repair = QPushButton(tr("adb_fix_btn"))
+        self.btn_usb_repair.setVisible(False)
+        self.btn_usb_repair.setToolTip(tr("adb_fix_tip"))
+        self.btn_usb_repair.setStyleSheet("""
+            QPushButton { background-color: #5e81ac; color: white; border: none;
+                          padding: 3px 10px; border-radius: 4px; font-size: 11px; }
+            QPushButton:hover { background-color: #81a1c1; }
+            QPushButton:disabled { background-color: #3b4252; color: #4c566a; }
+        """)
+
         usb_state_row.addWidget(self.lbl_usb_led)
         usb_state_row.addWidget(self.lbl_usb_state, 1)
+        usb_state_row.addWidget(self.btn_usb_repair)
         self.usb_state_widget = QWidget()
         self.usb_state_widget.setLayout(usb_state_row)
         self.usb_state_widget.setVisible(False)
@@ -1430,8 +1494,15 @@ class Ui_MainWindow:
         self.btn_log_save = QPushButton(tr("diag_save_btn"))
         self.btn_log_save.setCursor(Qt.PointingHandCursor)
         self.btn_log_save.setStyleSheet(self._CSS_SECONDARY)
+        # Diagnose kopieren: derselbe Bericht wie beim Speichern, aber direkt
+        # in der Zwischenablage. Fuer den Regelfall "jemand fragt im Chat,
+        # welche Versionen du hast" ist eine Datei zu umstaendlich.
+        self.btn_diag_copy = QPushButton(tr("diag_report_btn"))
+        self.btn_diag_copy.setCursor(Qt.PointingHandCursor)
+        self.btn_diag_copy.setStyleSheet(self._CSS_SECONDARY)
         head.addWidget(self.btn_log_open)
         head.addWidget(self.btn_log_copy)
+        head.addWidget(self.btn_diag_copy)
         head.addWidget(self.btn_log_save)
         cv.addLayout(head)
         self.lbl_log_hint = QLabel(tr("diag_hint"))

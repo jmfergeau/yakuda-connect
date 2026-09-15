@@ -6,7 +6,6 @@ import re
 import os
 import json
 import datetime
-import platform
 import time
 from PySide6.QtWidgets import (QApplication, QMainWindow, QLabel, QMessageBox,
                                QHBoxLayout, QVBoxLayout, QComboBox, QLineEdit,
@@ -43,7 +42,7 @@ import webbrowser
 # scripts/bump_version.py haelt sie automatisch mit core/version.py gleich,
 # und der Smoke-Test bricht ab, falls beide auseinanderlaufen oder das Muster
 # mehr als einmal vorkommt.
-APP_VERSION = "v1.2.7"
+APP_VERSION = "v1.2.8"
 
 # Community-Links (Settings -> "Community & Updates")
 DISCORD_URL = "https://discord.gg/X5TaN4A47h"
@@ -82,6 +81,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ui.ui_main import Ui_MainWindow
 
 # Tab-Logik (Mixins, siehe core/tabs/)
+# Die Worker werden hier nicht mehr benutzt, aber weiterhin durchgereicht:
+# main.UsbConnectWorker & Co. sind der Name, unter dem Tests und aeltere
+# Aufrufer sie kennen. Ein Umzug soll keine Importpfade brechen.
+from tabs.dashboard_mixin import (DashboardMixin,          # noqa: F401
+                                 ApkWorker, UsbConnectWorker,
+                                 AdbDoctorWorker, UsbHeadsetWorker,
+                                 PairingPinWorker)
 from tabs.games_mixin import GamesTabMixin
 from tabs.tools_mixin import ToolsTabMixin
 
@@ -90,8 +96,6 @@ from install_worker import (InstallWorker, UpdateWorker, AppUpdateCheckWorker,
                             AppUpdateWorker, XrizerGithubWorker)
 import appimage_installer as appimg
 import vr_environment as venv
-import wivrn_dashboard as wivrn_dash
-import usb_headsets as usbhs
 from config_manager import load_saved_settings, save_all_settings
 from streaming_tab import StreamingTab
 from backup_manager import (create_vr_backup, restore_vr_environment,
@@ -125,6 +129,7 @@ import wivrn_server
 from translations import tr, tr_amp, set_language, get_language
 from PySide6.QtCore import QThread, Signal as QtSignal
 
+import diagnostics as diag
 from logging_setup import get_logger, read_log_tail
 
 log = get_logger("main")
@@ -247,136 +252,11 @@ class PackageCheckWorker(QThread):
         self.result_signal.emit(results, updates_available)
 
 
-class ApkWorker(QThread):
-    """Lädt die neueste WiVRn APK von GitHub und installiert sie per adb."""
-    status_signal  = QtSignal(str)   # Statustext
-    finished_signal = QtSignal(bool) # Erfolg/Fehler
-
-    GITHUB_API = "https://api.github.com/repos/WiVRn/WiVRn/releases/latest"
-    APK_CACHE  = os.path.expanduser("~/.cache/yakuda-connect/wivrn-latest.apk")
-
-    def __init__(self):
-        super().__init__()
-        self._cancel = False
-
-    def cancel(self):
-        self._cancel = True
-
-    def run(self):
-        import urllib.request
-        import urllib.error
-
-        try:
-            # 1. Neueste Release-Info von GitHub holen
-            self.status_signal.emit("Find the latest version of WiVRn...")
-            req = urllib.request.Request(self.GITHUB_API,
-                headers={"User-Agent": "yakuda-connect"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                data = json.loads(r.read())
-
-            # APK-Asset finden (endet auf -release.apk)
-            apk_url = None
-            tag = data.get("tag_name", "unbekannt")
-            for asset in data.get("assets", []):
-                if asset["name"].endswith("-release.apk"):
-                    apk_url = asset["browser_download_url"]
-                    break
-
-            if not apk_url:
-                self.status_signal.emit("Fehler: No APK found in the current release.")
-                self.finished_signal.emit(False)
-                return
-
-            self.status_signal.emit(f"found: WiVRn {tag} — starting Download...")
-
-            # 2. APK herunterladen
-            os.makedirs(os.path.dirname(self.APK_CACHE), exist_ok=True)
-            with urllib.request.urlopen(apk_url, timeout=60) as r, \
-                 open(self.APK_CACHE, "wb") as f:
-                total = int(r.headers.get("Content-Length", 0))
-                downloaded = 0
-                while True:
-                    if self._cancel:
-                        self.status_signal.emit("Download interrupted.")
-                        self.finished_signal.emit(False)
-                        return
-                    chunk = r.read(65536)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total:
-                        mb_done = downloaded / 1_000_000
-                        mb_total = total / 1_000_000
-                        self.status_signal.emit(
-                            f"Lade herunter... {mb_done:.1f} MB / {mb_total:.1f} MB")
-
-            # 3. ADB-Gerät suchen
-            self.status_signal.emit("Search for a USB-connected headset...")
-            res = subprocess.run(["adb", "devices"],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=proc.LONG_TIMEOUT)
-
-            devices = [l.split()[0] for l in res.stdout.splitlines()
-                       if l.strip() and not l.startswith("List") and "device" in l]
-
-            if not devices:
-                self.status_signal.emit(
-                    "No headset found! Enable USB debugging and check the cable.")
-                self.finished_signal.emit(False)
-                return
-
-            serial = devices[0]
-            self.status_signal.emit(f"Headset found: {serial} — install APK...")
-
-            # 4. APK installieren
-            res = subprocess.run(
-                ["adb", "-s", serial, "install", "-r", self.APK_CACHE],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=proc.LONG_TIMEOUT)
-
-            if res.returncode == 0:
-                self.status_signal.emit(f"✔ WiVRn {tag} successfully installed!")
-                self.finished_signal.emit(True)
-            else:
-                self.status_signal.emit(f"Error during adb install going to tools and install android tools:\n{res.stderr.strip()}")
-                self.finished_signal.emit(False)
-
-        except Exception as e:
-            self.status_signal.emit(f"Fehler: {e}")
-            self.finished_signal.emit(False)
-
-
-class UsbHeadsetWorker(QThread):
-    """
-    Sucht im Hintergrund nach einer per USB angeschlossenen Brille.
-
-    Warum ein eigener Thread: der Teil ueber sysfs ist zwar sofort fertig,
-    der anschliessende ``adb devices``-Aufruf kann aber Sekunden brauchen —
-    adb startet dabei ggf. erst seinen Daemon. Im GUI-Thread wuerde das
-    Fenster genau so lange haengen, und zwar alle paar Sekunden erneut.
-    """
-    result_signal = QtSignal(dict)
-
-    def run(self):
-        try:
-            info = usbhs.scan()
-            # Gleich mitnehmen: laeuft das WiVRn-Dashboard? Das ist ein
-            # pgrep-Aufruf, der im GUI-Thread nichts verloren hat, und der
-            # Tooltip des USB-Hakens haengt davon ab.
-            info["dashboard_running"] = wivrn_dash.dashboard_is_running()
-            self.result_signal.emit(info)
-        except Exception as exc:  # noqa: BLE001 — Anzeige darf nie abstuerzen
-            log.debug("USB-Erkennung fehlgeschlagen: %s", exc)
-            self.result_signal.emit({"devices": [], "headset": None,
-                                     "state": "none", "adb_state": "",
-                                     "dashboard_running": False,
-                                     "profile": usbhs.profile_for(None)})
-
-
-class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
+class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
     """
     Hauptfenster.
 
-    Der Games- und der Tools-Tab liegen als Mixins in core/tabs/ — sie
+    Dashboard, Games und Tools liegen als Mixins in core/tabs/ — sie
     arbeiten auf demselben self, sind hier also ganz normal als Methoden
     verfuegbar. In dieser Datei bleiben: Fenster-Aufbau, Installation,
     Dashboard, Streaming, OpenXR, Autostart und Server-Steuerung.
@@ -399,6 +279,7 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         self.APP_VERSION = version_mod.APP_VERSION
         self.server_process = None
         self.pairing_process = None
+        self._pin_worker = None
 
         # --- Games-Tab ---
         self._games_scan_worker = None       # laufender Scan-Thread
@@ -450,7 +331,23 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         # Anzeige, und ein adb-Aufruf alle paar Sekunden waere reine
         # Beschaeftigung fuer die Platte.
         self._usb_worker = None
+        self._connect_worker = None          # laeuft ein Verbindungsversuch?
+        # Auto-Connect ist eine KANTE, kein Zustand: scharf beim Start,
+        # ausgeloest beim Anstecken, danach erst wieder scharf, wenn die
+        # Brille verschwunden war. Siehe dashboard_mixin._maybe_auto_connect_usb.
+        self._usb_auto_armed = True
+        self._doctor_worker = None           # adb-Diagnose/Reparatur
+        # None = noch nicht nachgesehen, () = kein Update, (alt, neu) = Update.
+        # Die Pruefung kostet einen Paketmanager-Aufruf und laeuft deshalb
+        # genau einmal pro Problemfall, nicht bei jedem Zeichnen.
+        self._adb_updated = None
+        self._adb_mtp_busy = False
+        self._adb_success_noted = False
         self._usb_last_info = None           # zuletzt erkannter Zustand
+        # Kurzlebige Rueckmeldung des Verbinden-Knopfes. Die USB-Zeile wird
+        # alle vier Sekunden neu gezeichnet — ohne Ablaufzeit waere die
+        # Meldung entweder sofort weg oder fuer immer da.
+        self._usb_notice = ("", "", 0.0)     # text, farbe, zeitpunkt
         # Gespeicherter refresh_rate-Wert ohne Bedienelement (siehe
         # apply_loaded_settings) — wird beim Speichern unveraendert
         # weitergereicht.
@@ -712,155 +609,6 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
     def open_kofi_link(self):
         QDesktopServices.openUrl(QUrl(KOFI_URL))
 
-    # ------------------------------------------------------------------ #
-    #  Diagnose: Logdatei                                                 #
-    # ------------------------------------------------------------------ #
-    # ------------------------------------------------------------------ #
-    #  Auto-Connect per USB (WiVRn-Dashboard-Einstellung)                 #
-    # ------------------------------------------------------------------ #
-    def load_usb_autoconnect(self):
-        """
-        Zustand aus wivrn-dashboard.conf uebernehmen. Bewusst NICHT aus
-        unserer eigenen Konfiguration: die Datei des Dashboards ist die
-        Wahrheit — der Nutzer kann die Option ja auch dort umstellen.
-        """
-        self.ui.check_usb_autoconnect.blockSignals(True)
-        self.ui.check_usb_autoconnect.setChecked(wivrn_dash.get_auto_connect_usb())
-        self.ui.check_usb_autoconnect.blockSignals(False)
-        self._update_usb_tooltip()
-
-    def _update_usb_tooltip(self, running=None):
-        """
-        Tooltip des Hakens "Automatisch per USB verbinden".
-
-        Laeuft das WiVRn-Dashboard gerade, wird der Hinweis angehaengt, dass
-        es seine Einstellungen beim Beenden zurueckschreibt und diese
-        Aenderung damit wieder kassieren kann. Frueher stand das als
-        dauerhafte gelbe Zeile im Dashboard — fuer einen Sonderfall zu viel
-        Platz. Im Tooltip steht es genau dort, wo man ohnehin hinschaut,
-        bevor man den Haken setzt.
-
-        ``running=None`` heisst "selbst nachsehen". Der Aufrufer kann das
-        Ergebnis auch mitgeben, wenn er es (etwa aus dem Hintergrund-Thread)
-        schon hat — dann laeuft hier kein zweites pgrep.
-        """
-        if running is None:
-            running = wivrn_dash.dashboard_is_running()
-        tip = tr("streaming_usb_autoconnect_tip")
-        if running:
-            # Der uebersetzte Text bringt sein Warnzeichen selbst mit.
-            tip = f"{tip}\n\n{tr('streaming_usb_dashboard_running')}"
-        self.ui.check_usb_autoconnect.setToolTip(tip)
-
-    def on_usb_autoconnect_toggled(self, checked):
-        """Schreibt die Option direkt in die Dashboard-Konfiguration."""
-        if not wivrn_dash.set_auto_connect_usb(checked):
-            # Zurueckstellen, damit der Haken nicht etwas anzeigt, was nicht
-            # gespeichert wurde.
-            self.ui.check_usb_autoconnect.blockSignals(True)
-            self.ui.check_usb_autoconnect.setChecked(not checked)
-            self.ui.check_usb_autoconnect.blockSignals(False)
-            QMessageBox.warning(self, tr("streaming_usb_autoconnect"),
-                                tr("streaming_usb_write_failed").format(
-                                    path=wivrn_dash.dashboard_config_file()))
-            return
-        self._update_usb_tooltip()
-
-    # ------------------------------------------------------------------ #
-    #  USB-Ampel: haengt eine Brille am Kabel — und wuerde sie verbinden?  #
-    # ------------------------------------------------------------------ #
-    def check_usb_headset(self):
-        """
-        Startet einen Erkennungslauf im Hintergrund. Laeuft noch einer, wird
-        NICHT nachgelegt — sonst stapeln sich bei langsamem adb die Threads.
-        """
-        if self._usb_worker is not None and self._usb_worker.isRunning():
-            return
-        self._usb_worker = UsbHeadsetWorker()
-        self._usb_worker.result_signal.connect(self._on_usb_scan_done)
-        self._usb_worker.start()
-
-    def _on_usb_scan_done(self, info):
-        self._render_usb_state(info)
-
-    def _render_usb_state(self, info):
-        """
-        Zeichnet die kompakte USB-Zeile unter den gekoppelten Headsets.
-
-        Sichtbar wird sie NUR, wenn es etwas zu tun gibt: Kabel steckt, aber
-        WiVRn kaeme per adb nicht dran. Laeuft alles (gruen) oder haengt gar
-        nichts am Kabel (grau), bleibt die Zeile weg — dass eine Brille per
-        USB da ist, steht dann schon als "· USB" an ihrem Listeneintrag.
-
-        Bewusst getrennt vom Scan: nach einem Sprachwechsel wird nur neu
-        gezeichnet, ohne erneut zu suchen — dafuer merkt sich diese Methode
-        den zuletzt gezeichneten Zustand.
-        """
-        vorher = self._usb_device_names()
-        if info:
-            self._usb_last_info = info
-
-        info = self._usb_last_info
-        state = (info or {}).get("state", "none")
-        headset = (info or {}).get("headset") or {}
-        name = headset.get("name", "")
-
-        if state == "unauthorized":
-            color, text = "#ebcb8b", tr("usb_state_unauthorized").format(name=name)
-        elif state == "usb_only":
-            color, text = "#ebcb8b", tr("usb_state_usb_only").format(name=name)
-        elif state == "no_adb":
-            color, text = "#ebcb8b", tr("usb_state_no_adb").format(name=name)
-        elif state == "ready":
-            color, text = "#a3be8c", ""
-        else:
-            color, text = "#4c566a", ""
-
-        self.ui.lbl_usb_led.setStyleSheet(f"color:{color}; font-size:14px;")
-        self.ui.lbl_usb_state.setText(text)
-        self.ui.usb_state_widget.setVisible(bool(text))
-
-        self._apply_refresh_profile((info or {}).get("profile"))
-        # Tooltip des USB-Hakens aktuell halten (Dashboard kann zwischendurch
-        # gestartet oder beendet worden sein).
-        if info is not None and "dashboard_running" in info:
-            self._update_usb_tooltip(info["dashboard_running"])
-
-        # Liste nur dann neu einlesen, wenn sich am Kabel wirklich etwas
-        # geaendert hat — sonst liefe alle vier Sekunden ein wivrnctl-Aufruf
-        # ins Leere.
-        if self._usb_device_names() != vorher:
-            self.refresh_headset_list()
-
-    def _usb_device_names(self):
-        """Namen der aktuell per USB erkannten Brillen (klein geschrieben)."""
-        info = self._usb_last_info or {}
-        return tuple(sorted(
-            (d.get("name") or "").strip().lower()
-            for d in info.get("devices", []) if d.get("name")))
-
-    def _apply_refresh_profile(self, profile):
-        """
-        Zeigt, welche Bildwiederholraten die erkannte Brille beherrscht.
-
-        Bewusst nur eine Anzeige: Die Rate laesst sich vom PC aus gar nicht
-        setzen — WiVRns Server-Konfiguration hat dafuer keinen Schluessel,
-        der Client im Headset bestimmt sie (siehe core/config_manager.py).
-        Frueher stand hier ein Auswahlfeld, dessen Wert wirkungslos in WiVRns
-        config.json landete.
-        """
-        rates = (profile or {}).get("rates") or usbhs.ALL_RATES
-        model = (profile or {}).get("model", "")
-
-        if model:
-            self.ui.lbl_refresh_value.setText(
-                tr("refresh_supported").format(
-                    name=model,
-                    rates=", ".join(f"{r}" for r in rates)))
-        else:
-            self.ui.lbl_refresh_value.setText(tr("refresh_no_headset"))
-        self.ui.lbl_refresh_hint.setText(tr("refresh_where"))
-
     def open_log_file(self):
         """Oeffnet die Logdatei im Standardprogramm des Systems."""
         path = paths.log_file()
@@ -922,36 +670,24 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         QMessageBox.information(self, tr("diag_title"),
                                 tr("diag_saved").format(path=path))
 
-    def _build_diagnostics_report(self):
-        """Kopfzeilen mit Systemangaben + das Ende der Logdatei."""
-        lines = [
-            "yakuda-connect diagnostics",
-            "=" * 60,
-            f"App version   : {self.APP_VERSION}",
-            f"Date          : {datetime.datetime.now().isoformat(timespec='seconds')}",
-            f"Python        : {sys.version.split()[0]}",
-            f"Platform      : {platform.platform()}",
-        ]
-        # Jede Angabe einzeln absichern: faellt eine aus (WiVRn nicht
-        # installiert, kein Headset), soll der Bericht trotzdem entstehen —
-        # er wird ja gerade dann gebraucht, wenn etwas kaputt ist.
-        try:
-            lines.append(f"Desktop       : {os.environ.get('XDG_CURRENT_DESKTOP', '?')} "
-                         f"({os.environ.get('XDG_SESSION_TYPE', '?')})")
-        except Exception as exc:
-            log.debug("_build_diagnostics_report: Desktop — %s", exc)
-        try:
-            lines.append(f"WiVRn server  : {venv.wivrn_server_binary() or '-'}")
-            lines.append(f"OpenXR runtime: {venv.primary_active_runtime()}")
-        except Exception as exc:
-            log.debug("_build_diagnostics_report: VR — %s", exc)
-        try:
-            lines.append(f"Firewall      : {fw.detect().get('kind') or '-'}")
-        except Exception as exc:
-            log.debug("_build_diagnostics_report: Firewall — %s", exc)
+    def copy_diagnostics_to_clipboard(self):
+        """
+        Den Diagnosebericht in die Zwischenablage legen — ohne Logschwanz.
 
-        lines += ["", "-" * 60, "log tail:", "-" * 60, read_log_tail()]
-        return "\n".join(lines)
+        Bewusst OHNE das Log: in eine Chatnachricht passt es nicht, und wer
+        im Discord nach "welche Versionen hast du" gefragt wird, will genau
+        diesen kurzen Block einfuegen. Fuers Log gibt es den Knopf daneben,
+        fuer beides zusammen den Speichern-Knopf.
+        """
+        report = diag.build_report(self.APP_VERSION)
+        QApplication.clipboard().setText(report)
+        QMessageBox.information(
+            self, tr("diag_title"),
+            tr("diag_report_copied").format(lines=len(report.splitlines())))
+
+    def _build_diagnostics_report(self):
+        """Systemangaben (core/diagnostics.py) plus das Ende der Logdatei."""
+        return diag.build_report(self.APP_VERSION, log_tail=read_log_tail())
 
     # ------------------------------------------------------------------ #
     #  Advanced Mode (Schalter unten links in der Seitenleiste)
@@ -1294,6 +1030,7 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         QTimer.singleShot(800, self.check_usb_headset)
         self.ui.btn_log_open.clicked.connect(self.open_log_file)
         self.ui.btn_log_copy.clicked.connect(self.copy_log_to_clipboard)
+        self.ui.btn_diag_copy.clicked.connect(self.copy_diagnostics_to_clipboard)
         self.ui.btn_log_save.clicked.connect(self.save_diagnostics_file)
         self.ui.toggle_advanced.toggled.connect(self.on_advanced_mode_toggled)
         self.ui.btn_community_donate.clicked.connect(self.open_kofi_link)
@@ -1337,6 +1074,7 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
 
         # APK Installation
         self.ui.btn_apk_install.clicked.connect(self.start_apk_install)
+        self.ui.btn_apk_download.clicked.connect(self.start_apk_download)
         self.ui.btn_apk_cancel.clicked.connect(self.cancel_apk_install)
         self._apk_worker = None
 
@@ -1359,6 +1097,10 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         self.ui.btn_refresh_list.clicked.connect(self.check_usb_headset)
         self.ui.btn_remove_headset.clicked.connect(self.remove_selected_headset)
         self.ui.btn_disconnect_headset.clicked.connect(self.disconnect_current_headset)
+        # Verbinden per Kabel (adb reverse + am start, wie WiVRns Dashboard)
+        self.ui.btn_connect_headset.clicked.connect(self.connect_usb_headset)
+        # adb-Handshake reparieren (erscheint nur, wenn adb klemmt)
+        self.ui.btn_usb_repair.clicked.connect(self.repair_adb_handshake)
 
         self.autostart_rows = []
         self.update_autostart_fields()
@@ -1482,43 +1224,6 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         QApplication.clipboard().setText(self.ui.txt_openxr_content.toPlainText())
         self.ui.btn_openxr_copy_content.setText(tr("openxr_copied"))
         QTimer.singleShot(1500, lambda: self.ui.btn_openxr_copy_content.setText(tr("openxr_copy_btn")))
-
-    def start_apk_install(self):
-        """Startet Download und Installation der WiVRn APK."""
-        if self._apk_worker and self._apk_worker.isRunning():
-            return
-
-        # Prüfen ob adb verfügbar ist
-        if not shutil.which("adb"):
-            self.ui.lbl_apk_status.setText(
-                "⚠ android-tools nicht installiert — gehe zu Tools und installiere es zuerst.")
-            self.ui.lbl_apk_status.setStyleSheet("color: #ebcb8b; font-size: 11px; font-weight: bold;")
-            return
-
-        self.ui.btn_apk_install.setEnabled(False)
-        self.ui.btn_apk_cancel.setVisible(True)
-        self.ui.lbl_apk_status.setText(tr("apk_starting"))
-        self.ui.lbl_apk_status.setStyleSheet("color: #88c0d0; font-size: 11px;")
-
-        self._apk_worker = ApkWorker()
-        self._apk_worker.status_signal.connect(self.ui.lbl_apk_status.setText)
-        self._apk_worker.finished_signal.connect(self._on_apk_finished)
-        self._apk_worker.start()
-
-    def cancel_apk_install(self):
-        if self._apk_worker:
-            self._apk_worker.cancel()
-
-    def _on_apk_finished(self, success):
-        self.ui.btn_apk_install.setEnabled(True)
-        self.ui.btn_apk_cancel.setVisible(False)
-        if success:
-            self.ui.lbl_apk_status.setStyleSheet(
-                "color: #a3be8c; font-size: 11px; font-weight: bold;")
-        else:
-            self.ui.lbl_apk_status.setStyleSheet(
-                "color: #bf616a; font-size: 11px;")
-        self._apk_worker = None
 
     def on_language_changed(self, index):
         lang = "en" if index == 0 else "de"
@@ -3045,67 +2750,27 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         self.ui.chk_steamvr_tracker.blockSignals(False)
         self.ui.num_apps.blockSignals(False)
 
-    def refresh_headset_list(self):
+    def _release_worker_on_finish(self, attr):
         """
-        Gekoppelte Headsets auflisten. Haengt eines davon gerade am USB-Kabel,
-        bekommt sein Eintrag ein "· USB" angehaengt — die Information steht
-        damit direkt am Geraet statt in einer eigenen Zeile weiter oben.
+        Referenz auf einen Worker erst freigeben, wenn der Thread WIRKLICH
+        fertig ist.
+
+        Der naheliegende Weg — ``self._x_worker = None`` im Ergebnis-Slot —
+        ist eine Falle: das eigene Ergebnis-Signal wird aus ``run()`` heraus
+        gesendet, also BEVOR der Thread endet. Faellt damit die letzte
+        Referenz weg, raeumt Python das QThread-Objekt ab, waehrend es noch
+        laeuft, und Qt beendet den Prozess mit
+        "QThread: Destroyed while thread is still running".
+
+        Das passiert nicht jedes Mal, sondern genau dann, wenn die
+        Speicherbereinigung ungluecklich faellt — also selten genug, um im
+        Test durchzurutschen, und haeufig genug, um Nutzer zu treffen.
+        Qts eigenes ``finished``-Signal kommt dagegen erst NACH ``run()``.
         """
-        self.ui.list_headsets.clear()
-        if not wivrn_server.is_running(self.server_process):
-            self.ui.list_headsets.addItem(tr("dashboard_no_server"))
+        worker = getattr(self, attr, None)
+        if worker is None:
             return
-        try:
-            res = subprocess.run(["wivrnctl", "list-paired"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=proc.DEFAULT_TIMEOUT)
-            if res.returncode == 0:
-                for line in res.stdout.strip().split('\n'):
-                    if not line.strip() or "Headset name" in line: continue
-                    self.ui.list_headsets.addItem(self._tag_usb(line.strip()))
-            if self.ui.list_headsets.count() == 0:
-                self.ui.list_headsets.addItem(tr("dashboard_no_paired"))
-        except Exception as e: self.ui.list_headsets.addItem(tr("err_generic").format(err=e))
-
-    def _tag_usb(self, line):
-        """
-        Haengt "· USB" an, wenn der Name des Listeneintrags zu einer per USB
-        erkannten Brille passt.
-
-        Verglichen wird ueber den Namen, nicht ueber die Reihenfolge: sind
-        mehrere Brillen gekoppelt, darf die Markierung nicht an der falschen
-        landen. Passt kein Name, bleibt der Eintrag unveraendert — dann sagt
-        die Statuszeile unter der Liste, was am Kabel haengt.
-        """
-        low = line.lower()
-        for name in self._usb_device_names():
-            if name and name in low:
-                return f"{line}   · USB"
-        return line
-
-    def remove_selected_headset(self):
-        item = self.ui.list_headsets.currentItem()
-        if not item or "Keine" in item.text() or "Server" in item.text(): return
-        match = re.match(r'^(\d+)', item.text())
-        if match and QMessageBox.question(self, tr("headset_unpair_title"),
-                                     tr("headset_unpair_text").format(name=item.text()),
-                                     QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
-            proc.run(["wivrnctl", "unpair", match.group(1)], timeout=proc.DEFAULT_TIMEOUT)
-            self.refresh_headset_list()
-
-    def disconnect_current_headset(self):
-        proc.run(["wivrnctl", "disconnect"], timeout=proc.DEFAULT_TIMEOUT)
-        self.refresh_headset_list()
-
-    def toggle_pairing_mode(self, checked):
-        if checked:
-            if not wivrn_server.is_running(self.server_process):
-                self.ui.chk_pairing.setChecked(False)
-                return
-            self.pairing_process = subprocess.Popen(["wivrnctl", "pair"], stdout=subprocess.PIPE, text=True)
-            output = self.pairing_process.stdout.readline()
-            self.ui.txt_code.setText(output.replace("PIN:", "").strip() if "PIN:" in output else "Aktiv...")
-        else:
-            if self.pairing_process: self.pairing_process.terminate()
-            self.ui.txt_code.setText("")
+        worker.finished.connect(lambda: setattr(self, attr, None))
 
     def is_headset_connected(self):
         """
@@ -3902,9 +3567,23 @@ class VRApp(GamesTabMixin, ToolsTabMixin, QMainWindow):
         "_auto_backup_worker",      # automatisches Erst-Backup
         "_oxr_health_worker",       # OpenXR-Manifest-Pruefung
         "_pp_worker",               # ProtonPlus-Installation
-        "_games_db_worker",         # Spiele-Datenbank
+        # ACHTUNG, hier lag eine stille Fehlfunktion: die Liste enthielt
+        # "apk_worker" und "_games_db_worker" — beide Attribute gibt es
+        # nicht. getattr() liefert dann None, die Schleife ueberspringt den
+        # Eintrag wortlos, und genau die Worker, die am laengsten laufen
+        # (Download und Installation), wurden beim Schliessen NIE
+        # abgewartet. Aufgefallen ist es nie, weil ein Absturz beim Beenden
+        # aussieht wie ein Absturz beim Beenden.
+        #
+        # Neue Namen deshalb bitte gegen das echte Attribut pruefen —
+        # tests/test_core.py tut das jetzt auch.
+        "_games_db_check_worker",   # Spiele-Datenbank: Versionsabfrage
+        "_games_db_dl_worker",      # Spiele-Datenbank: Download
         "tool_worker",              # Tool-Installation
-        "apk_worker",               # WiVRn-APK per adb
+        "_apk_worker",              # WiVRn-APK: Download/Installation
+        "_connect_worker",          # Verbinden per Kabel (adb)
+        "_doctor_worker",           # adb-Diagnose/Reparatur
+        "_pin_worker",              # PIN-Zeile von wivrnctl pair
         "_usb_worker",              # USB-Ampel im Dashboard
     )
 

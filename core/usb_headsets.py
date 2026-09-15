@@ -11,7 +11,9 @@ Zwei Fragen beantwortet dieses Modul:
    (fast immer) ``product``/``manufacturer`` als Klartext.
 
 2. **Wuerde "Automatisch per USB verbinden" auch wirklich funktionieren?**
-   WiVRns Dashboard verbindet ueber USB per **adb** (``adb forward``). Steckt
+   WiVRns Dashboard verbindet ueber USB per **adb** (``adb reverse`` — die
+   Brille oeffnet localhost:9757, der Tunnel zeigt zum PC; ``forward`` waere
+   die falsche Richtung). Steckt
    die Brille zwar am Kabel, ist aber USB-Debugging aus oder der PC am Headset
    nicht bestaetigt, taucht sie in ``adb devices`` gar nicht bzw. als
    ``unauthorized`` auf — die Automatik greift dann NICHT. Genau das ist der

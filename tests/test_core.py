@@ -297,3 +297,45 @@ def test_locales_are_shipped_by_packaging():
     assert "locales" in pkgbuild, "PKGBUILD kopiert locales/ nicht mit!"
     build_script = (ROOT / "build_appimage.sh").read_text(encoding="utf-8")
     assert "locales" in build_script, "build_appimage.sh kopiert locales/ nicht mit!"
+
+
+def test_background_worker_names_exist():
+    """
+    Jeder Name in ``VRApp._BACKGROUND_WORKERS`` muss einem Attribut
+    entsprechen, das im Code auch wirklich gesetzt wird.
+
+    Anlass: in der Liste standen "apk_worker" und "_games_db_worker",
+    waehrend die Attribute "_apk_worker", "_games_db_check_worker" und
+    "_games_db_dl_worker" heissen. ``getattr(self, name, None)`` liefert
+    dann None, die Aufraeumschleife ueberspringt den Eintrag WORTLOS — und
+    ausgerechnet der APK-Download lief beim Schliessen ungebremst weiter.
+    Qt beendet den Prozess in dem Fall mit SIGABRT.
+
+    Der Fehler ist per Hand unsichtbar (kein Absturz, keine Logzeile), aber
+    hier in drei Zeilen nachweisbar: der Quelltext wird nach einer
+    Zuweisung an das Attribut durchsucht. Bewusst textuell, damit der Test
+    ohne Qt und ohne laufendes Fenster auskommt.
+    """
+    import re
+
+    main_src = (ROOT / "core" / "main.py").read_text(encoding="utf-8")
+    mixin_src = "\n".join(p.read_text(encoding="utf-8")
+                          for p in sorted((ROOT / "core" / "tabs").glob("*.py")))
+    sources = main_src + "\n" + mixin_src
+
+    names = re.search(r"_BACKGROUND_WORKERS\s*=\s*\((.*?)\n    \)", main_src, re.S)
+    assert names, "_BACKGROUND_WORKERS nicht gefunden"
+    # Nur echte Eintraege, keine Kommentarzeilen: im Block darueber stehen
+    # die alten, falschen Namen in Anfuehrungszeichen als Warnung — die
+    # duerfen den Test nicht ausloesen.
+    entries = [m.group(1)
+               for line in names.group(1).splitlines()
+               if line.strip().startswith('"')
+               for m in [re.match(r'\s*"([^"]+)"', line)] if m]
+    assert entries, "Liste ist leer"
+
+    for name in entries:
+        assert re.search(rf"self\.{re.escape(name)}\s*=", sources), (
+            f"_BACKGROUND_WORKERS nennt '{name}', aber self.{name} wird "
+            f"nirgends zugewiesen — der Worker wird beim Schliessen "
+            f"stillschweigend uebersprungen.")

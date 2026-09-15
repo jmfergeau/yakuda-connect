@@ -40,6 +40,11 @@ set -euo pipefail
 APP="yakuda-connect"
 ARCH="x86_64"
 BUILD_DIR="$(pwd)/AppDir"
+# Die fertige AppImage landet in build/ statt im Projektordner. Der Ordner
+# wird bei jedem Lauf frisch angelegt (siehe unten) — so liegt dort immer
+# genau eine Datei und niemals die AppImage des letzten Release daneben,
+# die man beim Hochladen verwechseln koennte.
+OUT_DIR="$(pwd)/build"
 
 # Alte Aufrufe (fuse2 / fuse3 / both) sollen nicht hart scheitern.
 if [ $# -gt 0 ]; then
@@ -63,15 +68,21 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-OUT="$(pwd)/${APP}-${VERSION}-${ARCH}.AppImage"
+OUT="$OUT_DIR/${APP}-${VERSION}-${ARCH}.AppImage"
 RUNTIME_URL="https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${ARCH}"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/yakuda-connect/build"
 RUNTIME="$CACHE_DIR/runtime-type2-${ARCH}"
 mkdir -p "$CACHE_DIR"
 
+# Ausgabeordner zuruecksetzen. Bewusst erst HIER, nachdem die Version
+# gelesen wurde: bricht das Skript vorher ab, bleibt die AppImage des
+# letzten Laufs erhalten.
+rm -rf "$OUT_DIR"
+mkdir -p "$OUT_DIR"
+
 echo "=== yakuda-connect AppImage Builder ==="
 echo "Version: $VERSION"
-echo "Ziel:    $(basename "$OUT")  (fuse2 + fuse3)"
+echo "Ziel:    build/$(basename "$OUT")  (fuse2 + fuse3)"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -267,7 +278,7 @@ fi
 
 echo ""
 echo "Fertig:"
-echo "   $(basename "$OUT")   ($(du -h "$OUT" | cut -f1))"
+echo "   build/$(basename "$OUT")   ($(du -h "$OUT" | cut -f1))"
 cat << EOF
 
 Diese eine Datei laeuft auf:
@@ -278,5 +289,5 @@ Diese eine Datei laeuft auf:
    libfuse2 muss NICHT installiert sein: libfuse3 steckt statisch im Runtime.
 
 Fehlt FUSE ganz (Container, gehaerteter Kernel, kein /dev/fuse):
-   ./$(basename "$OUT") --appimage-extract-and-run
+   ./build/$(basename "$OUT") --appimage-extract-and-run
 EOF
