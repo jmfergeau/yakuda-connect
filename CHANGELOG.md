@@ -1,8 +1,8 @@
 # Changelog - Yakuda Connect
 
-### 🚀 v1.2.8
+### 🚀 v1.2.8 2026-09-15
 
-#### 🇩🇪 Deutsch
+#### 🇩🇪 Deutsch-
 
 * **Neu: „adb reparieren" (`core/adb_doctor.py`).** Nach einem Systemupdate von `android-tools` findet adb die Brille oft nicht mehr, obwohl sich am Kabel nichts geändert hat. Dahinter stecken vier verschiedene Ursachen, die für den Nutzer identisch aussehen — die App unterscheidet sie jetzt und sagt, welcher Handgriff dran ist.
 * **Ursache 1, Versionskonflikt:** das Update hat `/usr/bin/adb` ersetzt, der laufende adb-Server ist aber noch der alte. Normalerweise heilt das von selbst; nicht aber, wenn ein anderes Programm (SideQuest, Android Studio) den Server festhält oder er unter einem anderen Benutzer läuft. Der Knopf macht `kill-server` + `start-server`.
