@@ -10,7 +10,7 @@ import time
 from PySide6.QtWidgets import (QApplication, QMainWindow, QLabel, QMessageBox,
                                QHBoxLayout, QVBoxLayout, QComboBox, QLineEdit,
                                QPushButton, QFileDialog, QWidget, QCompleter)
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl, QEventLoop
 from PySide6.QtGui import (QDesktopServices)
 
 import webbrowser
@@ -42,7 +42,7 @@ import webbrowser
 # scripts/bump_version.py haelt sie automatisch mit core/version.py gleich,
 # und der Smoke-Test bricht ab, falls beide auseinanderlaufen oder das Muster
 # mehr als einmal vorkommt.
-APP_VERSION = "v1.2.9"
+APP_VERSION = "v1.3.0"
 
 # Community-Links (Settings -> "Community & Updates").
 # HIER werden Discord und Ko-fi gepflegt — es gibt keine zweite Stelle im
@@ -128,6 +128,7 @@ import version as version_mod
 from ui import theme
 from ui.background import BackgroundLayer
 import wivrn_server
+import exit_guard
 from translations import tr, tr_amp, set_language, get_language
 from PySide6.QtCore import QThread, Signal as QtSignal
 
@@ -384,6 +385,13 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         self._shutdown_timer.setInterval(self._STOP_TICK_MS)
         self._shutdown_timer.timeout.connect(self._poll_server_shutdown)
 
+        # --- Server mit der App beenden (Einstellungen -> Erweitert / System) ---
+        # Vor init_logic_connections(): dort laeuft schon der erste
+        # update_server_status_ui(), und der fragt diese Werte ab.
+        self._stop_server_with_app = exit_guard.enabled_in(load_saved_settings())
+        self._exit_guard = exit_guard.ExitGuard()
+        self._exit_cleanup_done = False
+
         self.init_logic_connections()
         # Farbthema anwenden, sobald die Oberflaeche steht. Vorher hat noch
         # kein Widget ein Stylesheet, das sich umfaerben liesse.
@@ -613,6 +621,18 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
 
     def open_kofi_link(self):
         QDesktopServices.openUrl(QUrl(KOFI_URL))
+
+    def show_changelog(self):
+        """Vollstaendiges CHANGELOG.md als Popup (nur UI-Sprache)."""
+        from ui.release_notes_dialog import show_release_notes
+        import release_notes
+        return show_release_notes(self, release_notes.CHANGELOG, tr("changelog_title"))
+
+    def show_highlights(self):
+        """HIGHLIGHTS.md — das Wichtigste pro Version, ohne Fachbegriffe."""
+        from ui.release_notes_dialog import show_release_notes
+        import release_notes
+        return show_release_notes(self, release_notes.HIGHLIGHTS, tr("highlights_title"))
 
     def open_log_file(self):
         """Oeffnet die Logdatei im Standardprogramm des Systems."""
@@ -1003,6 +1023,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         self.ui.chk_games_autoscan.setChecked(games_db.auto_scan_enabled())
         self.ui.chk_games_autoscan.toggled.connect(games_db.set_auto_scan)
         self.ui.btn_games_reset.clicked.connect(self.reset_games_list)
+        self.ui.chk_stop_server_with_app.setChecked(self._stop_server_with_app)
+        self.ui.chk_stop_server_with_app.toggled.connect(self.on_stop_server_with_app_toggled)
         self.ui.btn_games_db_update.clicked.connect(self.start_games_db_update)
         self._refresh_games_db_version()
         # Im Hintergrund prüfen, ob eine neuere Spiele-DB (games.json) vorliegt.
@@ -1045,6 +1067,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         self.ui.btn_log_save.clicked.connect(self.save_diagnostics_file)
         self.ui.toggle_advanced.toggled.connect(self.on_advanced_mode_toggled)
         self.ui.btn_community_donate.clicked.connect(self.open_kofi_link)
+        self.ui.btn_changelog.clicked.connect(self.show_changelog)
+        self.ui.btn_highlights.clicked.connect(self.show_highlights)
         # WayVR Design (Settings): cubee-cb-Design installieren / Config löschen
         self._wayvr_worker = None
         self.ui.btn_wayvr_install.clicked.connect(self.start_wayvr_design_install)
@@ -2924,6 +2948,7 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
                 self._autostart_procs.append(p)
             except Exception as e:
                 log.warning(f"[Autostart] Konnte '{cmd}' nicht starten: {e}")
+        self._sync_exit_guard()
 
     # ------------------------------------------------------------------ #
     #  Eigene Kill-Befehle (Settings, ganz unten)
@@ -3336,21 +3361,9 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
             entries = load_saved_settings().get("custom_kill_commands", []) or []
         except Exception:
             entries = []
-        for e in entries:
-            cmd = e.get("cmd") if isinstance(e, dict) else (e if isinstance(e, str) else "")
-            cmd = (cmd or "").strip()
-            if not cmd:
-                continue
-            try:
-                # Als Shell starten, aber warten (die Befehle sind typisch schnelle
-                # pkill/killall/...); wenn einer hängt, nach 5s aufgeben und weiter.
-                subprocess.run(cmd, shell=True,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                               timeout=5)
-            except subprocess.TimeoutExpired:
-                log.info(f"[Autostart] Zusatz-Kill-Befehl brauchte zu lange: {cmd}")
-            except Exception as e:
-                log.warning(f"[Autostart] Zusatz-Kill-Befehl fehlgeschlagen ({cmd}): {e}")
+        # Liegt in exit_guard, weil der Waechter-Prozess dieselben Befehle
+        # ausfuehren muss, wenn die App hart beendet wurde.
+        exit_guard.run_kill_commands(entries)
 
     def stop_autostart_apps(self):
         """Beendet alle zuvor gestarteten Autostart-Programme (samt Kindprozessen)."""
@@ -3383,6 +3396,7 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
                     except Exception as exc:
                         log.debug("stop_autostart_apps: ignoriert — %s", exc)
         self._autostart_procs = []
+        self._sync_exit_guard()
 
     def start_wivrn_server(self):
         current_settings = load_saved_settings()
@@ -3543,6 +3557,9 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
             self.ui.lbl_status_dot.setStyleSheet("color: #bf616a; font-size: 24px; margin-left: 10px;")
             self.ui.lbl_status_text.setText(tr("dashboard_inactive"))
             self.ui.lbl_status_text.setStyleSheet("font-weight: bold; color: #7b88a1;")
+        # Jeder Zustandswechsel des Servers laeuft hier durch — also auch
+        # der richtige Ort, um den Waechter auf dem Laufenden zu halten.
+        self._sync_exit_guard()
 
     def on_server_toggled(self, checked):
         """Reagiert auf eine ECHTE Nutzer-Betätigung des Schalters."""
@@ -3559,6 +3576,83 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         self.ui.toggle_server.setChecked(running)
         self.ui.toggle_server.sync_offset()
         self._syncing_toggle = False
+
+    # ------------------------------------------------------------------ #
+    #  Server mit der App beenden (siehe core/exit_guard.py)
+    # ------------------------------------------------------------------ #
+    def on_stop_server_with_app_toggled(self, checked):
+        """Schalter unter Einstellungen -> Erweitert / System."""
+        self._stop_server_with_app = bool(checked)
+        if not update_json(paths.config_file("config.json"),
+                           {exit_guard.SETTING_KEY: bool(checked)}):
+            log.warning("'Server mit der App beenden' konnte nicht gespeichert werden.")
+        self._sync_exit_guard()
+
+    def _exit_stop_wanted(self):
+        """Soll beim Ende der App der Server gestoppt werden?"""
+        if exit_guard.disabled_by_env() or not getattr(self, "_stop_server_with_app", False):
+            return False
+        own = self.server_process is not None and self.server_process.poll() is None
+        return bool(self._server_running or self._server_stopping or own)
+
+    def _sync_exit_guard(self):
+        """Dem Waechter-Prozess den aktuellen Stand schicken."""
+        guard = getattr(self, "_exit_guard", None)
+        # Waehrend des Schliessens nichts mehr melden: der Waechter soll den
+        # Stand "scharf" behalten. Wird die App MITTEN im Aufraeumen hart
+        # beendet (zweites pkill -9), macht er den Rest.
+        if guard is None or getattr(self, "_exit_cleanup_done", False):
+            return
+        try:
+            guard.update(self._exit_stop_wanted(),
+                         [p.pid for p in getattr(self, "_autostart_procs", [])])
+        except Exception as exc:  # Zusatzschutz — darf die App nie stoeren
+            log.debug("_sync_exit_guard: ignoriert — %s", exc)
+
+    def _stop_server_for_exit(self):
+        """
+        Beim Schliessen: Server beenden wie der Dashboard-Schalter — nur am
+        Stueck statt per Timer. Der Timer wuerde nach dem Schliessen nie
+        wieder ticken.
+
+        Das Fenster verschwindet vorher. Das Beenden kann nach einer
+        VR-Sitzung ein paar Sekunden dauern, und ein Fenster, das nach dem
+        Klick aufs X stehen bleibt, sieht aus wie eine haengende App.
+        """
+        log.info("[Server] App wird geschlossen — Server wird mit beendet "
+                 "(Einstellung '%s').", exit_guard.SETTING_KEY)
+        self.hide()
+        # Einmal die Ereignisschleife laufen lassen, damit das Ausblenden
+        # beim Fenstermanager ankommt. Ohne Nutzereingaben: ein Klick, der
+        # noch in der Warteschlange steckt, soll jetzt nichts mehr ausloesen.
+        QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+
+        if self.pairing_process:
+            try:
+                self.pairing_process.terminate()
+            except Exception as exc:
+                log.debug("_stop_server_for_exit (pairing): ignoriert — %s", exc)
+            self.pairing_process = None
+        self.stop_autostart_apps()
+        if self._server_log_fh:
+            try:
+                self._server_log_fh.close()
+            except Exception as exc:
+                log.debug("_stop_server_for_exit (log): ignoriert — %s", exc)
+            self._server_log_fh = None
+
+        stopped = wivrn_server.stop_blocking(
+            self.server_process,
+            term_timeout=self._STOP_TERM_MS / 1000,
+            kill_timeout=self._STOP_KILL_MS / 1000)
+        if stopped:
+            self.server_process = None
+            self._server_running = False
+            log.info("[Server] beendet.")
+        else:
+            log.error("[Server] laeuft trotz SIGKILL weiter: PIDs %s",
+                      wivrn_server.server_pids())
+        return stopped
 
     # Alle Hintergrund-Threads, die beim Schliessen noch laufen koennen.
     # Wird ein QThread zerstoert, waehrend er laeuft, beendet Qt den Prozess
@@ -3599,7 +3693,17 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
     )
 
     def closeEvent(self, event):
-        """Beim Schliessen alle Hintergrund-Threads geordnet beenden."""
+        """Beim Schliessen Server (je nach Einstellung) und Threads beenden."""
+        # Nur einmal. Das Beenden des Servers wartet einige Sekunden; kommt in
+        # der Zeit ein zweites SIGTERM (oder ein zweiter Klick), schliesst
+        # exit_guard erneut alle Fenster und wir landen verschachtelt wieder
+        # hier. Der innere Aufruf darf dann nichts tun — sonst wuerde er den
+        # Waechter entlassen, waehrend der aeussere noch aufraeumt.
+        if self._exit_cleanup_done:
+            event.accept()
+            return
+        self._exit_cleanup_done = True
+
         # Zuerst die Timer anhalten: ein Tick waehrend des Aufraeumens wuerde
         # einen frischen Worker starten, auf den niemand mehr wartet.
         self.usb_poll_timer.stop()
@@ -3607,6 +3711,12 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         # Auch die Nachschau beim Server-Beenden: laeuft sie noch, wuerde ihr
         # naechster Tick auf ein halb abgeraeumtes Fenster zugreifen.
         self._shutdown_timer.stop()
+
+        # Die Frage VOR dem Zuruecksetzen von _server_stopping stellen: wer
+        # waehrend des laufenden Beendens schliesst, will den Server trotzdem
+        # aus haben.
+        if self._exit_stop_wanted():
+            self._stop_server_for_exit()
         self._server_stopping = False
 
         for name in self._BACKGROUND_WORKERS:
@@ -3631,6 +3741,9 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
             except Exception as exc:
                 log.debug("closeEvent (%s): ignoriert — %s", name, exc)
 
+        # Aufgeraeumt ist — der Waechter kann gehen, ohne selbst zu handeln.
+        self._exit_guard.release()
+
         super().closeEvent(event)
 
     def manual_server_check(self):
@@ -3647,5 +3760,6 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VRApp()
+    exit_guard.install_quit_signals(app)
     window.show()
     sys.exit(app.exec())

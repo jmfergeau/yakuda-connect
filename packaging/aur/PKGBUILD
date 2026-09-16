@@ -11,7 +11,7 @@
 # Von dort wird gepusht — nicht von hier.
 
 pkgname=yakuda-connect
-pkgver=1.2.9
+pkgver=1.3.0
 pkgrel=1
 pkgdesc="WiVRn VR management software with gaming optimization and OpenXR/OpenVR fixes"
 arch=('any')
@@ -50,7 +50,10 @@ package() {
     install -d "$dest"
     # locales/ ist PFLICHT: dort liegen seit v1.1.5 alle Texte der
     # Oberflaeche. Fehlt der Ordner, bricht translations.py beim Start ab.
-    for item in core ui assets locales config starter.py; do
+    # CHANGELOG.md/HIGHLIGHTS.md: seit v1.3.0 in der App lesbar
+    # (Einstellungen -> Community & Updates). Fehlen sie, zeigt der Dialog
+    # nur einen GitHub-Link.
+    for item in core ui assets locales config starter.py CHANGELOG.md HIGHLIGHTS.md; do
         [ -e "$item" ] && cp -r "$item" "$dest/"
     done
 

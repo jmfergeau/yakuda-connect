@@ -1,5 +1,136 @@
 # Changelog - Yakuda Connect
 
+### 🚀 v1.3.0
+
+#### 🇩🇪 Deutsch
+
+**WiVRn-Server wird mit der App beendet — egal, wie die App endet.**
+
+* **Neue Einstellung „WiVRn-Server mit der App beenden"** unter Einstellungen → Erweitert / System, standardmäßig an. Bisher lief der Server nach dem Schließen von yakuda-connect einfach weiter und hielt Encoder und Audiogerät belegt.
+* **Beendet wird wie beim Ausschalten im Dashboard:** Kopplung, eigene Kill-Befehle, Autostart-Programme, dann SIGTERM an den Server. Reagiert er nach 4 s nicht, wird ein eventueller systemd-Nutzerdienst gestoppt und per SIGKILL nachgefasst.
+* **X am Fenster und Schließen über die Taskleiste:** Das Fenster verschwindet sofort, das Beenden läuft danach. Ein Fenster, das nach dem Klick noch sekundenlang stehen bleibt, sieht aus wie eine hängende App.
+* **`pkill`, „Beenden" im Taskmanager/Ressourcenmonitor, Strg+C, geschlossenes Terminal:** SIGTERM, SIGINT und SIGHUP werden jetzt abgefangen und laufen denselben Weg wie ein Klick aufs X. Vorher starb Python einfach, ohne dass `closeEvent` lief. Damit Qt das Signal sofort bemerkt und nicht erst beim nächsten Timer, weckt `signal.set_wakeup_fd` die Ereignisschleife über einen `QSocketNotifier` auf.
+* **`kill -9`, „Prozess abschießen", Absturz:** SIGKILL lässt sich nicht abfangen. Deshalb gibt es jetzt einen kleinen Wächter-Prozess (`yakuda-guard`, neues Modul `core/exit_guard.py`). Er läuft nur, solange der Server läuft und die Einstellung an ist. Er hängt an einer Pipe zur App: Stirbt die App, liest er EOF und räumt auf. Beim normalen Beenden hat die App schon selbst aufgeräumt und entlässt ihn.
+* **Der Wächter ignoriert SIGTERM.** `pkill -f yakuda-connect` trifft auch ihn, weil der Pfad in seiner Kommandozeile steht. Würde er mitsterben, bliebe genau der Fall unbewacht, für den es ihn gibt. Herumhängen kann er trotzdem nicht: Er endet immer mit der App.
+* **Autostart-Programme werden über PID *und* Startzeit erkannt.** Eine PID wird nach dem Ende eines Prozesses irgendwann neu vergeben. Der Wächter schießt keine fremde Prozessgruppe ab, nur weil sie zufällig dieselbe Nummer bekommen hat.
+* **Grenze:** Werden App und Wächter gleichzeitig per SIGKILL beendet (`pkill -9 -f yakuda-connect`), räumt niemand auf.
+* **Neu: `wivrn_server.stop_blocking()`.** Dieselbe Eskalation wie der Timer in `stop_wivrn_server`, aber am Stück. Beim Beenden gibt es keine Ereignisschleife mehr, die einen Timer bedienen würde.
+* **Eigene Kill-Befehle laufen über `exit_guard.run_kill_commands()`**, weil App und Wächter dieselben Befehle ausführen müssen.
+
+**Nicht-Steam-Spiele im Games-Tab**
+
+* **„+ Spiel hinzufügen" zeigt jetzt auch Spiele, die in Steam als Nicht-Steam-Spiel eingetragen sind** (Heroic-, Lutris- und GOG-Starter, eigene Builds, Emulatoren). Sie stehen in der Steam-Auswahl, gekennzeichnet mit „(Nicht-Steam-Spiel)".
+* **Sie bekommen dieselben Einstellungen wie Steam-Spiele:** Proton-Auswahl, Startparameter-Schalter, eigene Parameter, Config-Backup, Play-Knopf auf Kachel und Panel, „Entfernen". Das geht, weil ein Nicht-Steam-Spiel in Steam eine vollwertige AppID hat. Die gemerkten Einstellungen, CompatToolMapping und `compatdata/` funktionieren damit unverändert.
+* **Neues Modul `core/steam_shortcuts.py`** liest Steams `userdata/<Konto>/config/shortcuts.vdf`. Die Datei ist binär, der Textparser für `config.vdf` kann sie nicht lesen. Alle Steam-Konten und Flatpak-Steam werden berücksichtigt; ein Link von `~/.steam/steam` auf dieselbe Datei zählt einmal.
+* **Die AppID wird vorzeichenlos verwendet.** Steam speichert sie als vorzeichenbehaftete 32-Bit-Zahl, benutzt in `CompatToolMapping`, `compatdata` und `grid` aber dieselben Bits ohne Vorzeichen. Nicht-Steam-IDs haben das oberste Bit gesetzt und lassen sich so von echten AppIDs unterscheiden, ohne eine zweite ID-Art einzuführen. Sehr alte Einträge ohne `appid`-Feld bekommen Steams CRC32-ID.
+* **Startparameter landen im Feld `LaunchOptions` in `shortcuts.vdf`**, nicht in `localconfig.vdf`. Geschrieben wird verlustfrei: Jedes nicht geänderte Byte bleibt gleich, unbekannte Feldtypen führen zum Abbruch statt zu einer halb verstandenen Datei. Vorher entsteht `shortcuts.vdf.bak.<Zeit>`, geschrieben wird atomar.
+* **Die Startparameter, die der Eintrag schon hatte, bleiben erhalten.** Heroic- und Lutris-Einträge starten nur über sie (`heroic://launch/...`, `lutris:rungameid/...`). Sie werden beim Eintragen einmal gemerkt und im Panel als Basis-Parameter verwendet, wie die hinterlegten Parameter eines kuratierten Spiels. Später aus der Datei gelesen, stünden dort schon die eigenen Schalter, und ein abgeschalteter ließe sich nie mehr entfernen.
+* **Gestartet wird über `steam://rungameid/<Spiel-ID>`** mit der 64-Bit-ID `(AppID << 32) | 0x02000000`. `-applaunch` kennt nur echte Steam-Spiele.
+* **Cover kommen nur aus dem Grid-Ordner**, jetzt auch im Querformat (`<AppID>.png`) und als Hero-Bild. Einen Download-Versuch bei Steams Bildserver gibt es für Nicht-Steam-Spiele nicht.
+* **Nur von Hand eingetragen, nie automatisch erkannt.** Steam führt für sie keine VR-Kategorie, und der Programmpfad zeigt bei Heroic/Lutris nur auf einen Starter. Raten würde jeden Emulator mit einsammeln. Wird das Spiel in Steam gelöscht, verschwindet es beim nächsten Scan.
+* **Hinweis bei laufendem Steam:** Steam schreibt `shortcuts.vdf` selbst neu, sobald man dort einen Eintrag bearbeitet. Läuft Steam beim Play-Klick, empfiehlt die Statuszeile deshalb, Steam vorher zu schließen.
+
+**Windows-Spiele über Steam statt Wine, Bilder für eigene und Nicht-Steam-Spiele**
+
+* **Die rechte Spalte „Eigenes Spiel hinzufügen" nimmt keine `.exe` mehr als eigenes Spiel an.** Ohne Steam liefen Windows-Programme nur über das nackte `wine` — ohne Proton, ohne Steams Runtime und damit für VR praktisch nie brauchbar. Wählt man eine `.exe`, erscheint statt „Hinzufügen" ein Hinweis und der Knopf **„In Steam eintragen"**. Native Programme (AppImage, `*.x86_64`, Skripte) bleiben eigene Spiele wie bisher.
+* **„In Steam eintragen" legt das Programm als Nicht-Steam-Spiel in Steam an** (`steam_shortcuts.add_shortcut`) und holt es sofort in die Liste — mit Proton-Auswahl, Startparametern und allen übrigen Einstellungen. Die AppID wird wie bei Steam ROM Manager aus CRC32(Exe + Name) gebildet, dasselbe Programm unter demselben Namen bekommt also nie einen zweiten Eintrag. Pfade stehen wie bei Steam in Anführungszeichen, damit Leerzeichen funktionieren.
+* **Das richtige Steam-Konto:** Eingetragen wird beim zuletzt angemeldeten Konto (`loginusers.vdf`, `MostRecent`), sonst beim einzigen, sonst bei dem mit der jüngsten `localconfig.vdf`. Gibt es noch keine `shortcuts.vdf`, wird sie angelegt. Ist die vorhandene nicht lesbar, wird nichts geschrieben.
+* **Steam wird vorher beendet**, genau wie bei „Use" — sonst würde Steam den neuen Eintrag beim Beenden wieder löschen. Der Ablauf „nachfragen → `steam -shutdown` → warten → schreiben" liegt dafür jetzt in einem eigenen Modul `core/steam_close.py`, das Games-Tab und Dialog gemeinsam nutzen. Wird der Dialog geschlossen, während er noch auf Steam wartet, wird nichts mehr geschrieben.
+* **Bestehende eigene `.exe`-Einträge bleiben erhalten.** Ihr Panel zeigt denselben Hinweis und „In Steam eintragen". Klappt das, wird der eigene Eintrag durch den Steam-Eintrag ersetzt (sonst stünde das Spiel doppelt in der Liste). Scheitert es, bleibt er unverändert.
+* **Neue Zeile „Bild (optional)"** im Dialog und in den Panels eigener und Nicht-Steam-Spiele, mit „Bild wählen …" und „Bild entfernen" (PNG/JPG).
+  * Bei **eigenen Spielen** wird das Bild in die App-Config kopiert, nicht nur verlinkt — ein Bild aus dem Download-Ordner wäre sonst nach dem Aufräumen weg. Der Dateiname ist zufällig: Kennungen wie `local:3` werden nach dem Löschen wiederverwendet, ein neues Spiel soll nicht das Bild des alten erben. Beim Wechseln oder Entfernen wird nur die eigene Kopie gelöscht, nie das Original.
+  * Bei **Nicht-Steam-Spielen** landet es als `<AppID>p.png` in Steams `grid`-Ordner und erscheint damit auch in der Steam-Bibliothek. Querformat-, Hero- und Logo-Bilder (z. B. von SteamGridDB) bleiben unberührt.
+  * **Auch links unter „Steam-Spiel hinzufügen"**: Wählt man dort ein Nicht-Steam-Spiel, erscheint dieselbe Bildzeile. Für echte Steam-Spiele bleibt sie ausgeblendet, die haben ihr Cover von Steam. Ein falscher Bildpfad trägt nichts ein; steht das Spiel schon in der Liste, wird nur das Bild gesetzt.
+
+**„Use" setzt Steams Haken „Kompatibilitätswerkzeug erzwingen" zuverlässig**
+
+* **Hintergrund:** Dieser Haken in Steams Eigenschaften ist nichts anderes als der Eintrag des Spiels in `config.vdf` → `CompatToolMapping`. „Use" hat ihn schon immer geschrieben, er kam aber in drei Fällen nicht an. Die sind jetzt behoben.
+* **Steam wird vorher beendet.** Steam hält `config.vdf` im Speicher und schreibt sie beim Beenden zurück. Ein Eintrag, der geschrieben wurde, während Steam lief, war danach weg — auch der bisherige Hinweis „greift nach einem Steam-Neustart" stimmte deshalb nicht, der Neustart war genau der Moment des Überschreibens. Läuft Steam, fragt „Use" jetzt, ob Steam beendet werden soll (`steam -shutdown`), wartet bis zu 30 Sekunden und schreibt erst danach. Klappt das Beenden nicht, wird nichts geschrieben.
+* **Auch Valves Proton wird eingetragen.** „Proton 11 (Standard)" hieß bisher: Eintrag entfernen, Steam nimmt sein Standard-Proton. Für Store-Spiele stimmt das, für Nicht-Steam-Spiele nicht — ohne Eintrag startete Steam die `.exe` ganz ohne Proton. Jetzt wird der interne Name des installierten Valve-Protons eingetragen (`proton_11`, sonst das neueste installierte, sonst `proton_experimental`). Ist gar keins installiert, sagt die App das.
+* **Eingetragen wird der interne Tool-Name**, nicht der Ordnername. Steam kennt ein Tool unter dem Namen aus seiner `compatibilitytool.vdf`. Meist ist das derselbe, bei Distributionspaketen oft nicht — und einen unbekannten Namen ignoriert Steam, der Haken bleibt aus. Kommentare in der Datei (GE schreibt `// Internal name of this tool` hinter den Namen) werden dabei übergangen.
+* **Proton aus Distributionspaketen wird erkannt.** `/usr/share/steam/compatibilitytools.d` und `/usr/local/share/steam/compatibilitytools.d` zählen jetzt mit, etwa für `proton-cachyos` aus dem CachyOS-Repo. Installiert wird dort nie etwas.
+* **Nach dem Schreiben wird nachgelesen** (`get_steam_compat_tool`). Steht der Name nicht in `config.vdf`, meldet die App das, statt Erfolg anzuzeigen.
+* **Für normale Steam-Spiele ist der ausdrückliche Eintrag unschädlich:** Er entspricht dem, was „Use" ohnehin anzeigt. Einziger Unterschied: Wechselt Valve später sein Standard-Proton, bleibt das Spiel auf der gewählten Version, bis man erneut „Use" drückt.
+
+**Changelog und Highlights in der App**
+
+* **Zwei neue Knöpfe unter Einstellungen → Allgemein & Updates**, in einer zweiten Reihe unter „Nach Updates suchen": **📜 Changelog** und **✨ Highlights**. Beide öffnen ein Fenster, in dem die Datei gelesen werden kann, ohne GitHub aufzurufen.
+* **Neue Datei `HIGHLIGHTS.md`.** Gleich aufgebaut wie der Changelog (Version → Deutsch/English), aber pro Version nur ein paar Sätze ohne Modulnamen und Fachbegriffe. Rückwirkend für alle Versionen bis v1.0.2-alpha geschrieben.
+* **Angezeigt wird nur die Sprache der Oberfläche.** Beide Sprachen untereinander hätten die Länge verdoppelt. Fehlt eine Sprache in einem Block, kommt Englisch (neues Modul `core/release_notes.py`, ohne Qt).
+* **Das Fenster ist nicht modal.** Wer beim Lesen auf eine neue Funktion stößt, kann sie im Hauptfenster suchen, ohne den Text zu schließen. Ein zweiter Klick holt das offene Fenster nach vorn, statt ein weiteres zu öffnen (`ui/release_notes_dialog.py`).
+* **Beide Dateien werden jetzt mitgeliefert** (PKGBUILD und `build_appimage.sh`). Fehlt eine trotzdem, zeigt das Fenster einen Link auf GitHub statt einer leeren Seite.
+
+**Einstellungen**
+
+* **Die Karte „Spiele" (Auto-Scan, „Games-Tab zurücksetzen") ist von „Allgemein & Updates" nach „Erweitert / System" umgezogen**, direkt unter „App beenden". Beides ändert das Verhalten der App bzw. greift in die Config ein und stand bisher zwischen Updates und Diagnose. Die zwei kurzen Karten mit je einem Schalter stehen oben, die lange Liste der Kill-Befehle darunter. Die Rückfrage beim Entfernen eines Spiels nennt den neuen Ort.
+
+**Tests**
+
+* **Neu: `tests/test_exit_guard.py` mit 33 Prüfungen, `tests/test_release_notes.py`, `tests/test_steam_shortcuts.py` und `tests/test_compat_mapping.py`.** Letzterer prüft unter anderem, dass `shortcuts.vdf` nach Lesen und Schreiben byte-gleich ist und sich beim Ändern der Startparameter nur genau dieses Feld unterscheidet. Ein Fehler dort könnte sonst alle Nicht-Steam-Spiele des Nutzers löschen. Abgedeckt sind der Wächter bei EOF, bei „bye", ohne Scharfschaltung, mit kaputten Zeilen und bei toter App trotz offener Pipe. Außerdem die Erkennung neu vergebener PIDs, das Eskalieren gegen eine SIGTERM-resistente Prozessgruppe und `stop_blocking` mit simulierter Uhr. Dazu kommen `closeEvent` mit Einstellung an/aus, doppeltes Schließen, die Anordnung der Einstellungsseiten und dass das Wächter-Modul kein PySide6 lädt.
+* **Nicht automatisch getestet ist der echte Wächter gegen einen echten Kill.** Er würde über /proc jeden `wivrn-server` treffen, auf einem Entwicklerrechner also den echten. Geprüft wurde dieser Weg von Hand mit einem Attrappen-Server: X, SIGTERM, `pkill -f`, SIGKILL, sturer Server, Einstellung aus.
+* **`YAKUDA_NO_EXIT_GUARD=1`** schaltet das Feature ab. Das setzen `tests/conftest.py` und `tests/smoke.py`, sonst würde `w.close()` im Smoke-Test auf einem Entwicklerrechner den laufenden Server beenden.
+
+#### 🇬🇧 English
+
+**The WiVRn server now stops with the app — no matter how the app ends.**
+
+* **New setting "Stop WiVRn server with app"** under Settings → Advanced / System, on by default. Previously the server kept running after closing yakuda-connect, holding on to the encoder and audio device.
+* **Stopping works like switching the server off on the dashboard:** pairing, custom kill commands, autostart programs, then SIGTERM to the server. If it doesn't react within 4 s, an active systemd user service is stopped and SIGKILL follows.
+* **Window X and closing from the taskbar:** the window disappears immediately and the shutdown runs afterwards.
+* **`pkill`, "End" in a task manager/resource monitor, Ctrl+C, closed terminal:** SIGTERM, SIGINT and SIGHUP are now caught and take the same path as clicking X. Previously Python simply died without running `closeEvent`. `signal.set_wakeup_fd` plus a `QSocketNotifier` wakes up the Qt event loop so the signal is handled right away.
+* **`kill -9`, "Kill process", crashes:** SIGKILL can't be caught, so there is now a small watchdog process (`yakuda-guard`, new module `core/exit_guard.py`). It only runs while the server is running and the setting is on. It is connected to the app through a pipe: when the app dies, it reads EOF and cleans up. On a normal exit the app has already cleaned up and releases it.
+* **The watchdog ignores SIGTERM**, because `pkill -f yakuda-connect` matches it too. It never lingers: it always ends with the app.
+* **Autostart programs are identified by PID *and* start time**, so a reused PID never gets another process group killed.
+* **Limitation:** if the app and the watchdog are both killed with SIGKILL at once (`pkill -9 -f yakuda-connect`), nothing cleans up.
+* **New: `wivrn_server.stop_blocking()`**, the same escalation as the timer-based stop, but in one go.
+
+**Non-Steam games in the Games tab**
+
+* **"+ Add Game" now also lists games added to Steam as non-Steam games** (Heroic, Lutris and GOG launchers, own builds, emulators), marked "(non-Steam game)".
+* **They get the same settings as Steam games:** Proton selection, launch option switches, custom options, config backup, play buttons and "Remove". A non-Steam game has a real AppID in Steam, so saved settings, CompatToolMapping and `compatdata/` work unchanged.
+* **New module `core/steam_shortcuts.py`** reads Steam's binary `userdata/<account>/config/shortcuts.vdf` for all accounts, native and Flatpak.
+* **The AppID is used unsigned**, as in `CompatToolMapping`, `compatdata` and `grid`. Non-Steam IDs have the top bit set, which tells them apart from real AppIDs. Very old entries without an `appid` field get Steam's CRC32 ID.
+* **Launch options are written to `LaunchOptions` in `shortcuts.vdf`**, losslessly: every unchanged byte stays the same, unknown field types abort instead of writing a half-understood file. A `shortcuts.vdf.bak.<time>` backup is made and the write is atomic.
+* **The entry's existing launch options are kept.** Heroic and Lutris entries only start through them. They are remembered once when the game is added and used as base options in the panel.
+* **Launched via `steam://rungameid/<game ID>`** with the 64-bit ID `(AppID << 32) | 0x02000000`.
+* **Covers only come from the grid folder**, now including landscape (`<AppID>.png`) and hero images. No download attempt from Steam's image server.
+* **Only added by hand, never auto-detected.** If the game is deleted in Steam, it disappears on the next scan.
+* **Hint while Steam is running:** Steam rewrites `shortcuts.vdf` itself when you edit an entry there, so the status line recommends closing Steam first.
+
+**Windows games through Steam instead of Wine, images for own and non-Steam games**
+
+* **"Add own game" no longer accepts a `.exe` as an own game.** Without Steam, Windows programs only ran through plain `wine`, without Proton. Choosing a `.exe` now shows a hint and an **"Add to Steam"** button instead of "Add". Native programs stay own games as before.
+* **"Add to Steam" creates a non-Steam game in Steam** and puts it straight into the list, with Proton selection and all settings. The AppID is CRC32(Exe + name) like Steam ROM Manager, so the same program never gets a second entry. The most recently logged-in account is used; a missing `shortcuts.vdf` is created, an unreadable one is left untouched.
+* **Steam is closed first**, just like with "Use". The shared flow now lives in `core/steam_close.py`.
+* **Existing own `.exe` entries are kept** and offer "Add to Steam" in their panel; on success the own entry is replaced.
+* **New "Image (optional)" row** in the dialog and the panels of own and non-Steam games. Own games get a copy in the app config (random file name, only our own copy is ever deleted); non-Steam games get `<AppID>p.png` in Steam's grid folder, so Steam shows it too. The left "Add Steam Game" column shows the same image row when a non-Steam game is selected.
+
+**"Use" reliably ticks Steam's "Force the use of a specific compatibility tool" checkbox**
+
+* **Background:** that checkbox is simply the game's entry in `config.vdf` → `CompatToolMapping`. "Use" always wrote it, but it didn't stick in three cases, which are now fixed.
+* **Steam is closed first.** Steam keeps `config.vdf` in memory and writes it back on exit, so an entry written while Steam ran was lost — the old "applies after a Steam restart" hint was wrong, because the restart is exactly when it gets overwritten. If Steam runs, "Use" now offers to close it (`steam -shutdown`), waits up to 30 seconds and only writes afterwards. If Steam doesn't close, nothing is written.
+* **Valve's Proton is written too.** "Proton 11 (Standard)" used to mean removing the entry. For non-Steam games that meant no Proton at all. Now the internal name of the installed Valve Proton is written (`proton_11`, otherwise the newest installed, otherwise `proton_experimental`).
+* **The internal tool name is written**, not the folder name — Steam ignores unknown names. Comments in `compatibilitytool.vdf` are skipped.
+* **Proton from distribution packages is detected** (`/usr/share/steam/compatibilitytools.d`, `/usr/local/share/steam/compatibilitytools.d`).
+* **The entry is read back after writing**; if it isn't there, the app says so instead of reporting success.
+
+**Changelog and highlights inside the app**
+
+* **Two new buttons under Settings → General & Updates**, in a second row below "Check for updates": **📜 Changelog** and **✨ Highlights**. Both open a window to read the file without going to GitHub.
+* **New file `HIGHLIGHTS.md`.** Same structure as the changelog (version → Deutsch/English), but only a few sentences per version without module names or jargon. Written retroactively for every version back to v1.0.2-alpha.
+* **Only the interface language is shown.** If a block lacks that language, English is used (new module `core/release_notes.py`, no Qt).
+* **The window is not modal**, and a second click brings the open window to the front instead of opening another one (`ui/release_notes_dialog.py`).
+* **Both files are now shipped** (PKGBUILD and `build_appimage.sh`). If one is missing anyway, the window shows a GitHub link instead of an empty page.
+
+**Settings**
+
+* **The "Games" card (auto-scan, "Reset games tab") moved from "General & Updates" to "Advanced / System"**, right below "Closing the app".
+
+**Tests**
+
+* **New: `tests/test_exit_guard.py` with 33 checks, `tests/test_release_notes.py`, `tests/test_steam_shortcuts.py` and `tests/test_compat_mapping.py`** (including a byte-exact round trip of `shortcuts.vdf`). The real watchdog against a real kill was tested manually with a dummy server, since an automated test would hit any real `wivrn-server` on a developer machine.
+* **`YAKUDA_NO_EXIT_GUARD=1`** disables the feature. It is set by `tests/conftest.py` and `tests/smoke.py`.
+
 ### 🚀 v1.2.9
 
 #### 🇩🇪 Deutsch

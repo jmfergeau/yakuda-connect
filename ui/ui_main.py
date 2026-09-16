@@ -534,6 +534,8 @@ class Ui_MainWindow:
         self.btn_games_add.setToolTip(tr("games_add_tip"))
         self.chk_games_autoscan.setText(tr("games_autoscan_label"))
         self.chk_games_autoscan.setToolTip(tr("games_autoscan_tip"))
+        self.chk_stop_server_with_app.setText(tr("exit_stop_server_label"))
+        self.chk_stop_server_with_app.setToolTip(tr("exit_stop_server_tip"))
         self.btn_games_reset.setText(tr("games_reset_btn"))
         self.btn_games_reset.setToolTip(tr("games_reset_tip"))
         self.btn_games_scan.setText(tr("games_scan_btn"))
@@ -579,6 +581,10 @@ class Ui_MainWindow:
         self.btn_community_check.setText(tr("community_check_btn"))
         self.btn_community_discord.setText(tr("community_discord_btn"))
         self.btn_community_donate.setText(tr("community_donate_btn"))
+        self.btn_changelog.setText(tr("changelog_btn"))
+        self.btn_changelog.setToolTip(tr("changelog_tip"))
+        self.btn_highlights.setText(tr("highlights_btn"))
+        self.btn_highlights.setToolTip(tr("highlights_tip"))
         # Diagnose / Logdatei
         self.btn_log_open.setText(tr("diag_open_btn"))
         self.btn_log_copy.setText(tr("diag_copy_btn"))
@@ -1322,7 +1328,7 @@ class Ui_MainWindow:
     #
     #  Aufbau nach UI/UX-Überarbeitung:
     #    * Sub-Tab-Navigation (QTabWidget) statt einer langen Scroll-Liste:
-    #        General & Updates | VR & OpenXR | Audio | Advanced / System
+    #        General & Updates | Design | VR & OpenXR | Audio | Advanced / System
     #    * Lange Erklärungstexte liegen NICHT mehr dauerhaft im Layout, sondern
     #      hinter einem (ⓘ)-Info-Icon neben der Sektionsüberschrift
     #      (Tooltip beim Hovern, Popover beim Klicken).
@@ -1503,9 +1509,27 @@ class Ui_MainWindow:
         self.btn_community_donate = QPushButton(tr("community_donate_btn"))
         self.btn_community_donate.setCursor(Qt.PointingHandCursor)
         self.btn_community_donate.setStyleSheet(self._CSS_DANGER)
-        head.addWidget(self.btn_community_check)
-        head.addWidget(self.btn_community_discord)
-        head.addWidget(self.btn_community_donate)
+        # Zweite Reihe: Changelog und Highlights stehen genau unter "Nach
+        # Updates suchen" und "Discord". Ein Raster statt zweier Zeilen, damit
+        # die Knoepfe spaltenweise gleich breit sind und nicht je nach
+        # Beschriftung versetzt stehen.
+        self.btn_changelog = QPushButton(tr("changelog_btn"))
+        self.btn_changelog.setCursor(Qt.PointingHandCursor)
+        self.btn_changelog.setToolTip(tr("changelog_tip"))
+        self.btn_changelog.setStyleSheet(self._CSS_SECONDARY)
+        self.btn_highlights = QPushButton(tr("highlights_btn"))
+        self.btn_highlights.setCursor(Qt.PointingHandCursor)
+        self.btn_highlights.setToolTip(tr("highlights_tip"))
+        self.btn_highlights.setStyleSheet(self._CSS_SECONDARY)
+        community_grid = QGridLayout()
+        community_grid.setHorizontalSpacing(6)
+        community_grid.setVerticalSpacing(6)
+        community_grid.addWidget(self.btn_community_check, 0, 0)
+        community_grid.addWidget(self.btn_community_discord, 0, 1)
+        community_grid.addWidget(self.btn_community_donate, 0, 2)
+        community_grid.addWidget(self.btn_changelog, 1, 0)
+        community_grid.addWidget(self.btn_highlights, 1, 1)
+        head.addLayout(community_grid)
         cv.addLayout(head)
         self.lbl_community_version = QLabel("")
         self.lbl_community_version.setStyleSheet("color:#7b88a1; font-size:11px;")
@@ -1569,30 +1593,6 @@ class Ui_MainWindow:
         cv.addLayout(head)
         cv.addWidget(AdvancedBox("backup_create"))
         cv.addWidget(AdvancedBox("backup_restore"))
-        gen_v.addWidget(card)
-
-        # -- Spiele --
-        # Der Auto-Scan ist der einzige Schalter, der hier hingehört: er
-        # entscheidet, ob der Games-Tab beim Öffnen von selbst nachsieht.
-        # Standard AN — genau weil so viele Nutzer den Scan-Knopf übersehen
-        # haben und vor einer leeren Liste standen.
-        card, cv = self._settings_card()
-        head, _, _ = self._settings_header("games_group", lambda: tr("games_group_desc"))
-        # Holt Spiele zurueck, die im Games-Tab ueber "Entfernen" aus der
-        # Liste genommen wurden. Steht hier und nicht im Tab selbst: dort
-        # waere es ein Knopf, der fast nie gebraucht wird, aber dauerhaft
-        # Platz neben den haeufigen Aktionen belegt.
-        self.btn_games_reset = QPushButton(tr("games_reset_btn"))
-        self.btn_games_reset.setCursor(Qt.PointingHandCursor)
-        self.btn_games_reset.setToolTip(tr("games_reset_tip"))
-        self.btn_games_reset.setStyleSheet(self._CSS_SECONDARY)
-        head.addWidget(self.btn_games_reset)
-        cv.addLayout(head)
-        self.chk_games_autoscan = QCheckBox(tr("games_autoscan_label"))
-        self.chk_games_autoscan.setCursor(Qt.PointingHandCursor)
-        self.chk_games_autoscan.setToolTip(tr("games_autoscan_tip"))
-        self.chk_games_autoscan.setStyleSheet("color:#d8dee9; font-size:12px;")
-        cv.addWidget(self.chk_games_autoscan)
         gen_v.addWidget(card)
 
         gen_v.addStretch()
@@ -1773,6 +1773,51 @@ class Ui_MainWindow:
         #  SEITE 4 — Advanced / System
         # ==============================================================
         page_adv, adv_v = self._settings_new_page()
+
+        # -- App beenden --
+        # Standard AN: wer yakuda-connect schliesst, geht davon aus, dass
+        # damit auch VR aus ist. Ein weiterlaufender Server blockiert den
+        # Encoder, haelt das Audiogeraet und laesst das Headset sich weiter
+        # verbinden. Wie das bei jeder Art des Beendens klappt (auch per
+        # pkill oder Taskmanager): siehe core/exit_guard.py.
+        card, cv = self._settings_card()
+        head, _, _ = self._settings_header("exit_group", lambda: tr("exit_group_desc"))
+        cv.addLayout(head)
+        self.chk_stop_server_with_app = QCheckBox(tr("exit_stop_server_label"))
+        self.chk_stop_server_with_app.setCursor(Qt.PointingHandCursor)
+        self.chk_stop_server_with_app.setToolTip(tr("exit_stop_server_tip"))
+        self.chk_stop_server_with_app.setStyleSheet("color:#d8dee9; font-size:12px;")
+        cv.addWidget(self.chk_stop_server_with_app)
+        adv_v.addWidget(card)
+
+        # -- Spiele --
+        # Bis v1.2.9 unter "Allgemein & Updates". Der Schalter aendert, wie
+        # die App sich verhaelt, und das Zuruecksetzen greift in die Config
+        # ein — beides gehoert zu "Erweitert / System", nicht neben Updates
+        # und Diagnose. Direkt unter "App beenden": zwei kurze Karten mit je
+        # einem Schalter oben, die lange Kill-Befehl-Liste darunter.
+        # Der Auto-Scan ist der einzige Schalter, der hier hingehört: er
+        # entscheidet, ob der Games-Tab beim Öffnen von selbst nachsieht.
+        # Standard AN — genau weil so viele Nutzer den Scan-Knopf übersehen
+        # haben und vor einer leeren Liste standen.
+        card, cv = self._settings_card()
+        head, _, _ = self._settings_header("games_group", lambda: tr("games_group_desc"))
+        # Holt Spiele zurueck, die im Games-Tab ueber "Entfernen" aus der
+        # Liste genommen wurden. Steht hier und nicht im Tab selbst: dort
+        # waere es ein Knopf, der fast nie gebraucht wird, aber dauerhaft
+        # Platz neben den haeufigen Aktionen belegt.
+        self.btn_games_reset = QPushButton(tr("games_reset_btn"))
+        self.btn_games_reset.setCursor(Qt.PointingHandCursor)
+        self.btn_games_reset.setToolTip(tr("games_reset_tip"))
+        self.btn_games_reset.setStyleSheet(self._CSS_SECONDARY)
+        head.addWidget(self.btn_games_reset)
+        cv.addLayout(head)
+        self.chk_games_autoscan = QCheckBox(tr("games_autoscan_label"))
+        self.chk_games_autoscan.setCursor(Qt.PointingHandCursor)
+        self.chk_games_autoscan.setToolTip(tr("games_autoscan_tip"))
+        self.chk_games_autoscan.setStyleSheet("color:#d8dee9; font-size:12px;")
+        cv.addWidget(self.chk_games_autoscan)
+        adv_v.addWidget(card)
 
         # -- Eigene Kill-Befehle (kompakte Liste) --
         card, cv = self._settings_card()

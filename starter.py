@@ -83,5 +83,10 @@ if __name__ == "__main__":
         app.setWindowIcon(QIcon(icon_path))
 
     window = VRApp()
+    # SIGTERM/SIGINT/SIGHUP (pkill, Taskmanager, Strg+C) wie einen Klick aufs
+    # X behandeln — sonst wuerde Python einfach sterben, ohne closeEvent.
+    # Harte Kills faengt der Waechter ab, siehe core/exit_guard.py.
+    import exit_guard
+    exit_guard.install_quit_signals(app)
     window.show()
     sys.exit(app.exec())

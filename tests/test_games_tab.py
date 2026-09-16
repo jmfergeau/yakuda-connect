@@ -447,3 +447,387 @@ def test_zuruecksetzen_knopf_ist_verdrahtet(app, clean_config, monkeypatch):
                         lambda self: gerufen.append(True))
     app.ui.btn_games_reset.click()
     assert gerufen == [True]
+
+
+# --------------------------------------------------------------------------- #
+#  Nicht-Steam-Spiele (in Steam als "Nicht-Steam-Spiel" hinzugefuegt)
+# --------------------------------------------------------------------------- #
+SHORTCUT_ID = "3000000001"
+
+
+def test_dialog_kennzeichnet_nicht_steam_spiele(app, clean_config):
+    import games_add_dialog as gad
+    from translations import tr
+
+    dialog = gad.AddGameDialog(app)
+    dialog._on_steam_games([
+        {"appid": "1234", "name": "Testspiel"},
+        {"appid": SHORTCUT_ID, "name": "Heroic Spiel", "shortcut": True},
+    ])
+    labels = [dialog.combo_steam.itemText(i) for i in range(dialog.combo_steam.count())]
+    assert tr("games_add_steam_shortcut") in labels[1]
+    assert tr("games_add_steam_shortcut") not in labels[0]
+    dialog.combo_steam.setCurrentIndex(1)
+    dialog.add_steam_game()
+    assert SHORTCUT_ID in clean_config.load_manual_steam_appids()
+    dialog.close()
+
+
+def test_nicht_steam_panel_hat_proton_und_behaelt_startparameter(app, clean_config, monkeypatch):
+    """Dieselben Einstellungen wie ein Steam-Spiel — und der Heroic-Aufruf
+    steht im finalen String, auch mit abgeschalteten Schaltern."""
+    from translations import tr
+    from PySide6.QtWidgets import QLabel
+
+    monkeypatch.setattr(clean_config, "shortcut_base_options",
+                        lambda appid: "--no-gui heroic://launch/x")
+    app.render_games_cards([], [{"appid": SHORTCUT_ID, "name": "Heroic Spiel"}])
+    app._on_game_tile_clicked(SHORTCUT_ID)
+    try:
+        game = app._game_data_for(SHORTCUT_ID)
+        assert game["shortcut"] is True and game["protons"], "keine Proton-Auswahl"
+        labels = " ".join(lb.text() for lb in app._games_detail_widget.findChildren(QLabel))
+        assert tr("games_params_section_shortcut") in labels
+        assert tr("games_proton_section") in labels
+        for cb in app._detail_toggles.values():
+            cb.setChecked(False)
+        assert "heroic://launch/x" in app._update_final_params()
+        # Der Kachel-Play nimmt dieselbe Basis, ohne dass das Panel offen ist.
+        assert "heroic://launch/x" in app._saved_launch_options(SHORTCUT_ID, game)
+    finally:
+        app._collapse_detail()
+
+
+def test_nicht_steam_kachel_laedt_kein_cover(app, clean_config):
+    app.render_games_cards([], [{"appid": SHORTCUT_ID, "name": "Heroic Spiel"}])
+    assert SHORTCUT_ID not in app._pending_covers
+
+
+# --------------------------------------------------------------------------- #
+#  "Use": Steams Haken wirklich setzen
+# --------------------------------------------------------------------------- #
+class _UseEnv:
+    """Steam-Seite von "Use" ohne echtes Steam: merkt sich, was passiert."""
+
+    def __init__(self, monkeypatch, db, running):
+        self.running = running
+        self.written = {}
+        self.popen = []
+        monkeypatch.setattr(db, "compat_mapping_name", lambda proton: ("proton_11", ""))
+        monkeypatch.setattr(db, "steam_is_running", lambda: self.running)
+        monkeypatch.setattr(db, "steam_shutdown_cmd", lambda: ["steam", "-shutdown"])
+        monkeypatch.setattr(db, "set_steam_compat_tool",
+                            lambda appid, name: (self.written.__setitem__(appid, name), (True, ""))[1])
+        monkeypatch.setattr(db, "get_steam_compat_tool", lambda appid: self.written.get(appid))
+        monkeypatch.setattr(db, "save_selected_proton", lambda appid, v: None)
+        import tabs.games_mixin as gm
+        real_popen = gm.subprocess.Popen
+
+        # subprocess ist global — nur Steam-Aufrufe abfangen, der Rest
+        # (z. B. lspci fuer die GPU-Erkennung beim Neuaufbau) laeuft normal.
+        def popen(cmd, **kw):
+            if cmd and cmd[0] == "steam":
+                self.popen.append(cmd)
+                return None
+            return real_popen(cmd, **kw)
+        monkeypatch.setattr(gm.subprocess, "Popen", popen)
+
+
+@pytest.fixture
+def use_panel(app, clean_config, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
+    monkeypatch.setattr(app, "_offer_config_backup", lambda appid, proton: True)
+    app.render_games_cards([], [{"appid": "1234", "name": "Testspiel"}])
+    app._on_game_tile_clicked("1234")
+    yield app
+    app._collapse_detail()
+
+
+def test_use_schreibt_sofort_wenn_steam_aus(use_panel, clean_config, monkeypatch):
+    env = _UseEnv(monkeypatch, clean_config, running=False)
+    use_panel._use_proton("1234", {"version": "Proton 11 (Standard)"})
+    assert env.written == {"1234": "proton_11"}
+    assert env.popen == []
+
+
+def test_use_bei_laufendem_steam_abbrechen_schreibt_nichts(use_panel, clean_config, monkeypatch):
+    from translations import tr
+    env = _UseEnv(monkeypatch, clean_config, running=True)
+    _bestaetige(monkeypatch, "cancel")
+    use_panel._use_proton("1234", {"version": "Proton 11 (Standard)"})
+    assert env.written == {} and env.popen == []
+    assert use_panel._detail_status_lbl.text() == tr("games_use_cancelled_steam")
+
+
+def test_use_beendet_steam_und_schreibt_danach(use_panel, clean_config, monkeypatch):
+    env = _UseEnv(monkeypatch, clean_config, running=True)
+    _bestaetige(monkeypatch, "games_close_steam_btn")
+    use_panel._use_proton("1234", {"version": "Proton 11 (Standard)"})
+    assert env.popen == [["steam", "-shutdown"]]
+    assert env.written == {}, "geschrieben, obwohl Steam noch laeuft"
+    env.running = False
+    use_panel._steam_close_timer.timeout.emit()
+    assert env.written == {"1234": "proton_11"}
+
+
+def test_use_gibt_auf_wenn_steam_nicht_endet(use_panel, clean_config, monkeypatch):
+    from translations import tr
+    env = _UseEnv(monkeypatch, clean_config, running=True)
+    _bestaetige(monkeypatch, "games_close_steam_btn")
+    monkeypatch.setattr(use_panel, "STEAM_SHUTDOWN_TIMEOUT_MS", 1000)
+    use_panel._use_proton("1234", {"version": "Proton 11 (Standard)"})
+    timer = use_panel._steam_close_timer
+    timer.timeout.emit()
+    timer.timeout.emit()
+    assert env.written == {}
+    assert use_panel._detail_status_lbl.text() == tr("games_close_steam_timeout")
+
+
+def test_use_meldet_wenn_eintrag_nicht_ankommt(use_panel, clean_config, monkeypatch):
+    from translations import tr
+    env = _UseEnv(monkeypatch, clean_config, running=False)
+    monkeypatch.setattr(clean_config, "get_steam_compat_tool", lambda appid: None)
+    use_panel._use_proton("1234", {"version": "Proton 11 (Standard)"})
+    assert "1234" in env.written
+    assert use_panel._detail_status_lbl.text() == tr("games_use_not_saved")
+
+
+def test_use_ohne_valve_proton(use_panel, clean_config, monkeypatch):
+    from translations import tr
+    env = _UseEnv(monkeypatch, clean_config, running=False)
+    monkeypatch.setattr(clean_config, "compat_mapping_name", lambda p: (None, "valve_missing"))
+    use_panel._use_proton("1234", {"version": "Proton 11 (Standard)"})
+    assert env.written == {}
+    assert use_panel._detail_status_lbl.text() == tr("games_valve_proton_missing")
+
+
+# --------------------------------------------------------------------------- #
+#  Windows-Programme -> Steam, Bilder
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def win_exe(tmp_path):
+    path = tmp_path / "Spiel.exe"
+    path.write_bytes(b"MZ")
+    return str(path)
+
+
+def test_dialog_zeigt_bei_exe_hinweis_statt_hinzufuegen(app, clean_config, exe, win_exe):
+    import games_add_dialog as gad
+    dialog = gad.AddGameDialog(app)
+    dialog.show()
+    try:
+        dialog.txt_exe.setText(exe)
+        assert dialog.btn_add_local.isVisible() and not dialog.btn_add_to_steam.isVisible()
+        assert not dialog.lbl_exe_hint.isVisible()
+        dialog.txt_exe.setText(win_exe)
+        assert dialog.btn_add_to_steam.isVisible() and not dialog.btn_add_local.isVisible()
+        assert dialog.lbl_exe_hint.isVisible()
+        # Enter im Feld darf nicht doch einen wine-Eintrag anlegen.
+        dialog.txt_name.setText("Spiel")
+        dialog.add_local_game()
+        assert clean_config.load_local_games() == []
+    finally:
+        dialog.close()
+
+
+def test_dialog_traegt_exe_in_steam_ein(app, clean_config, win_exe, monkeypatch):
+    import games_add_dialog as gad
+    calls = []
+    monkeypatch.setattr(clean_config, "steam_is_running", lambda: False)
+    monkeypatch.setattr(clean_config, "register_in_steam",
+                        lambda *a: (calls.append(a), ("3000000001", ""))[1])
+    dialog = gad.AddGameDialog(app)
+    try:
+        dialog.txt_name.setText("Spiel")
+        dialog.txt_exe.setText(win_exe)
+        dialog.txt_opts.setText("-vr")
+        dialog.add_to_steam()
+        assert calls == [("Spiel", win_exe, "-vr", "")]
+        assert dialog.changed and dialog.txt_exe.text() == ""
+    finally:
+        dialog.close()
+
+
+def test_dialog_steam_laeuft_abbrechen(app, clean_config, win_exe, monkeypatch):
+    import games_add_dialog as gad
+    from translations import tr
+    monkeypatch.setattr(clean_config, "steam_is_running", lambda: True)
+    monkeypatch.setattr(clean_config, "register_in_steam",
+                        lambda *a: pytest.fail("geschrieben, obwohl Steam laeuft"))
+    _bestaetige(monkeypatch, "cancel")
+    dialog = gad.AddGameDialog(app)
+    try:
+        dialog.txt_name.setText("Spiel")
+        dialog.txt_exe.setText(win_exe)
+        dialog.add_to_steam()
+        assert dialog.lbl_status.text() == tr("games_add_to_steam_cancelled")
+    finally:
+        dialog.close()
+
+
+def test_dialog_prueft_vor_steam(app, clean_config, tmp_path):
+    import games_add_dialog as gad
+    from translations import tr
+    dialog = gad.AddGameDialog(app)
+    try:
+        dialog.txt_name.setText("Spiel")
+        dialog.txt_exe.setText(str(tmp_path / "fehlt.exe"))
+        dialog.add_to_steam()
+        assert dialog.lbl_status.text() == tr("games_add_err_not_found")
+    finally:
+        dialog.close()
+
+
+def test_eigenes_exe_panel_bietet_steam_an(app, clean_config, exe, win_exe):
+    from PySide6.QtWidgets import QPushButton
+    from translations import tr
+    ok, gid_win = clean_config.add_local_game("Win", exe)          # erst nativ ...
+    clean_config.update_local_game(gid_win, exe=win_exe)            # ... dann alt-.exe
+    ok, gid_nat = clean_config.add_local_game("Nativ", exe)
+    app.render_games_cards([], [])
+    for gid, expected in ((gid_win, True), (gid_nat, False)):
+        app._on_game_tile_clicked(gid)
+        texts = [b.text() for b in app._games_detail_widget.findChildren(QPushButton)]
+        assert (tr("games_add_to_steam_btn") in texts) is expected
+        assert tr("games_image_choose_btn") in texts
+        app._collapse_detail()
+
+
+def test_eigenes_exe_spiel_wandert_nach_steam(app, clean_config, exe, win_exe, monkeypatch):
+    ok, gid = clean_config.add_local_game("Win", exe, "-vr")
+    clean_config.update_local_game(gid, exe=win_exe)
+    calls = []
+    monkeypatch.setattr(clean_config, "steam_is_running", lambda: False)
+    monkeypatch.setattr(clean_config, "register_in_steam",
+                        lambda *a: (calls.append(a), ("3000000001", ""))[1])
+    monkeypatch.setattr(app, "start_games_scan", lambda *a, **k: None)
+    app.render_games_cards([], [])
+    app.move_local_game_to_steam(gid)
+    assert calls == [("Win", win_exe, "-vr", "")]
+    assert clean_config.local_game(gid) is None
+
+
+def test_eigenes_spiel_steam_fehler_behaelt_eintrag(app, clean_config, exe, win_exe, monkeypatch):
+    ok, gid = clean_config.add_local_game("Win", exe)
+    clean_config.update_local_game(gid, exe=win_exe)
+    monkeypatch.setattr(clean_config, "steam_is_running", lambda: False)
+    monkeypatch.setattr(clean_config, "register_in_steam", lambda *a: (None, "no_account"))
+    app.render_games_cards([], [])
+    app._on_game_tile_clicked(gid)
+    app.move_local_game_to_steam(gid)
+    assert clean_config.local_game(gid) is not None
+    app._collapse_detail()
+
+
+def test_bild_im_panel_setzen_zeigt_cover(app, clean_config, exe, tmp_path):
+    from PySide6.QtGui import QImage
+    img = tmp_path / "cover.png"
+    q = QImage(60, 90, QImage.Format_RGB32)
+    q.fill(0x88c0d0)
+    q.save(str(img))
+    ok, gid = clean_config.add_local_game("Spiel", exe)
+    app.render_games_cards([], [])
+    app._on_game_tile_clicked(gid)
+    app._choose_game_image(gid, "local", path=str(img))
+    assert app._expanded_appid == gid, "Panel nach dem Setzen wieder zugeklappt"
+    assert clean_config.get_game_cover(gid)
+    assert app._detail_image_buttons[1].isEnabled()
+    app._clear_game_image(gid, "local")
+    assert clean_config.get_game_cover(gid) is None
+    app._collapse_detail()
+
+
+# --------------------------------------------------------------------------- #
+#  Bild beim Eintragen eines Nicht-Steam-Spiels (linke Spalte)
+# --------------------------------------------------------------------------- #
+def _png(path):
+    from PySide6.QtGui import QImage
+    q = QImage(60, 90, QImage.Format_RGB32)
+    q.fill(0x88c0d0)
+    q.save(str(path))
+    return str(path)
+
+
+def _dialog_with(app, games):
+    import games_add_dialog as gad
+    dialog = gad.AddGameDialog(app)
+    dialog.show()
+    dialog._on_steam_games(games)
+    return dialog
+
+
+GAMES_MIXED = [{"appid": "1234", "name": "Testspiel"},
+               {"appid": SHORTCUT_ID, "name": "Max_The_Elf_DEMO.exe", "shortcut": True}]
+
+
+def test_bildzeile_links_nur_bei_nicht_steam_spiel(app, clean_config):
+    dialog = _dialog_with(app, GAMES_MIXED)
+    try:
+        assert not dialog.txt_steam_image.isVisible()          # nichts gewaehlt
+        dialog.combo_steam.setCurrentIndex(0)                  # Steam-Spiel
+        assert not dialog.txt_steam_image.isVisible()
+        dialog.combo_steam.setCurrentIndex(1)                  # Nicht-Steam
+        assert dialog.txt_steam_image.isVisible()
+        assert dialog.btn_browse_steam_image.isVisible()
+    finally:
+        dialog.close()
+
+
+def test_nicht_steam_spiel_mit_bild_eintragen(app, clean_config, monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(clean_config, "set_shortcut_image",
+                        lambda appid, img: (calls.append((appid, img)), (True, ""))[1])
+    dialog = _dialog_with(app, GAMES_MIXED)
+    try:
+        dialog.combo_steam.setCurrentIndex(1)
+        img = _png(tmp_path / "cover.png")
+        dialog.txt_steam_image.setText(img)
+        dialog.add_steam_game()
+        assert SHORTCUT_ID in clean_config.load_manual_steam_appids()
+        assert calls == [(SHORTCUT_ID, img)]
+        assert dialog.txt_steam_image.text() == ""
+    finally:
+        dialog.close()
+
+
+def test_falsches_bild_traegt_nichts_ein(app, clean_config, monkeypatch, tmp_path):
+    from translations import tr
+    monkeypatch.setattr(clean_config, "set_shortcut_image",
+                        lambda *a: pytest.fail("Bild trotz Fehler gesetzt"))
+    dialog = _dialog_with(app, GAMES_MIXED)
+    try:
+        dialog.combo_steam.setCurrentIndex(1)
+        dialog.txt_steam_image.setText(str(tmp_path / "fehlt.png"))
+        dialog.add_steam_game()
+        assert clean_config.load_manual_steam_appids() == []
+        assert dialog.lbl_status.text() == tr("games_add_err_bad_image")
+    finally:
+        dialog.close()
+
+
+def test_bild_nachtraeglich_fuer_schon_eingetragenes(app, clean_config, monkeypatch, tmp_path):
+    from translations import tr
+    clean_config.add_manual_steam_appid(SHORTCUT_ID)
+    monkeypatch.setattr(clean_config, "set_shortcut_image", lambda *a: (True, ""))
+    dialog = _dialog_with(app, GAMES_MIXED)
+    try:
+        dialog.combo_steam.setCurrentIndex(1)
+        dialog.txt_steam_image.setText(_png(tmp_path / "cover.png"))
+        dialog.add_steam_game()
+        assert dialog.lbl_status.text() == tr("games_image_set")
+    finally:
+        dialog.close()
+
+
+def test_steam_spiel_ignoriert_bildfeld(app, clean_config, monkeypatch, tmp_path):
+    monkeypatch.setattr(clean_config, "set_shortcut_image",
+                        lambda *a: pytest.fail("Bild bei echtem Steam-Spiel gesetzt"))
+    dialog = _dialog_with(app, GAMES_MIXED)
+    try:
+        dialog.txt_steam_image.setText(_png(tmp_path / "cover.png"))  # Rest von vorher
+        dialog.combo_steam.setCurrentIndex(0)
+        dialog.add_steam_game()
+        assert clean_config.load_manual_steam_appids() == ["1234"]
+    finally:
+        dialog.close()

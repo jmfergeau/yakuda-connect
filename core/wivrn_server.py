@@ -45,6 +45,7 @@ auf die selbst ermittelten PIDs sagt genau, was passiert ist.
 """
 import os
 import signal
+import time
 
 import proc
 from logging_setup import get_logger
@@ -192,3 +193,44 @@ def stop_user_service():
         return False
     log.info("[Server] %s laeuft als systemd-Dienst — wird gestoppt.", SERVICE_UNIT)
     return proc.run_ok(["systemctl", "--user", "stop", SERVICE_UNIT], timeout=20)
+
+
+# --------------------------------------------------------------------------- #
+#  Beenden ohne Timer (App-Ende, Waechter)
+# --------------------------------------------------------------------------- #
+def _wait_gone(process, timeout, sleep, clock, tick):
+    deadline = clock() + timeout
+    while clock() < deadline:
+        if not is_running(process):
+            return True
+        sleep(tick)
+    return not is_running(process)
+
+
+def stop_blocking(process=None, term_timeout=4.0, kill_timeout=3.0, tick=0.1,
+                  _sleep=time.sleep, _clock=time.monotonic):
+    """
+    Dieselbe Eskalation wie ``stop_wivrn_server`` in main.py — aber am Stueck.
+
+    Im laufenden Betrieb wartet ein QTimer, damit die Oberflaeche bedienbar
+    bleibt. Beim Beenden der App gibt es keine Oberflaeche mehr, auf die man
+    Ruecksicht nehmen muesste, und keine Ereignisschleife, die den Timer
+    noch bedienen wuerde. Deshalb hier blockierend, mit denselben Fristen
+    (``VRApp._STOP_TERM_MS`` / ``_STOP_KILL_MS``).
+
+    Gibt True zurueck, wenn danach kein Server mehr laeuft.
+    """
+    if not is_running(process):
+        reap(process)
+        return True
+    request_stop(process)
+    if _wait_gone(process, term_timeout, _sleep, _clock, tick):
+        reap(process)
+        return True
+    log.warning("[Server] reagiert nach %.0f s nicht auf SIGTERM.", term_timeout)
+    stop_user_service()
+    force_stop(process)
+    gone = _wait_gone(process, kill_timeout, _sleep, _clock, tick)
+    if gone:
+        reap(process)
+    return gone

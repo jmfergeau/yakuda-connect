@@ -161,6 +161,8 @@ echo "[4/7] Kopiere Programmdateien..."
 # locales/ nicht vergessen — ohne den Ordner startet die App nicht (Texte).
 cp -r assets config core ui locales "$BUILD_DIR/usr/lib/yakuda-connect/"
 cp starter.py "$BUILD_DIR/usr/lib/yakuda-connect/"
+# Werden in der App angezeigt (Einstellungen -> Changelog / Highlights)
+cp CHANGELOG.md HIGHLIGHTS.md "$BUILD_DIR/usr/lib/yakuda-connect/"
 # Bytecode und Entwicklerreste gehoeren nicht in die Auslieferung
 find "$BUILD_DIR/usr/lib/yakuda-connect" -type d -name '__pycache__' -prune -exec rm -rf {} +
 find "$BUILD_DIR/usr/lib/yakuda-connect" -type f -name '*.py[co]' -delete

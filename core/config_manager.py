@@ -41,6 +41,9 @@ DEFAULT_SETTINGS = {
     "encoder": "Auto",
     "codec": "Automatic",
     "bitrate": 100,
+    # Einstellungen -> Erweitert / System -> "WiVRn-Server mit der App
+    # beenden". Schluessel und Standard kommen aus core/exit_guard.py.
+    "stop_server_with_app": True,
 }
 
 

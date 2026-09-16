@@ -197,7 +197,7 @@ class GamesTabMixin:
              geändert hat — sonst würde ein aufgeklapptes Spiel bei jedem
              Tab-Wechsel zuklappen.
 
-        Abschaltbar unter Einstellungen -> Allgemein -> Spiele.
+        Abschaltbar unter Einstellungen -> Erweitert / System -> Spiele.
         """
         first_visit = not self._games_tab_visited
         self._games_tab_visited = True
@@ -524,7 +524,9 @@ class GamesTabMixin:
             # Nur fuer echte Steam-Spiele nachladen. Eigene Eintraege haben
             # keine AppID — ein Download-Versuch koennte dort nur scheitern
             # und wuerde den Worker mit sinnlosen Anfragen belasten.
-            if games_db.steam_appinfo.is_steam_appid(appid):
+            # Nicht-Steam-Spiele ebenso wenig: Steams Bildserver kennt sie nicht.
+            if (games_db.steam_appinfo.is_steam_appid(appid)
+                    and not games_db.steam_shortcuts.is_shortcut_id(appid)):
                 self._pending_covers[str(appid)] = lbl_cover
         box.addWidget(lbl_cover, alignment=Qt.AlignHCenter)
 
@@ -606,13 +608,22 @@ class GamesTabMixin:
         name = self._games_untested_names.get(appid)
         if name is None:
             return None
-        return {
+        data = {
             "name": name,
             "untested": True,
             "protons": games_db.dynamic_protons(),
             "launch_params": {},
             "fixes": [],
         }
+        if games_db.steam_shortcuts.is_shortcut_id(appid):
+            # Nicht-Steam-Spiel: dieselben Einstellungen wie ein Steam-Spiel.
+            # Die Startparameter, die der Eintrag in Steam schon hatte,
+            # werden zur Basis — sonst ueberschriebe der erste Play-Klick
+            # z. B. den Heroic-/Lutris-Aufruf, ohne den nichts mehr startet.
+            data["shortcut"] = True
+            base = games_db.shortcut_base_options(appid)
+            data["launch_params"] = {"base": base} if base else {}
+        return data
 
     def _collapse_detail(self):
         """Klappt das aktuell offene Inline-Panel zu (falls eines offen ist)."""
@@ -706,15 +717,42 @@ class GamesTabMixin:
         custom = self._detail_custom_edit.text() if self._detail_custom_edit else ""
         games_db.save_launch_toggles(appid, self._current_toggle_keys(), custom)
 
+    # Wie lange auf das Ende von Steam gewartet wird. Steam speichert beim
+    # Beenden Bibliothek und Cloud-Stand — auf langsamen Platten dauert das.
+    STEAM_SHUTDOWN_TIMEOUT_MS = 30000
+    STEAM_SHUTDOWN_POLL_MS = 500
+
     def _use_proton(self, appid, proton):
         """
-        'Use': setzt diese Proton-Version als aktive Version für das Spiel —
-        sie wird in Steams CompatToolMapping geschrieben (gleicher Weg wie
-        ProtonPlus), in der App-Config gemerkt und vom 'Play'-Button benutzt.
+        'Use': setzt diese Proton-Version als aktive Version für das Spiel.
+
+        Geschrieben wird in Steams config.vdf -> CompatToolMapping (gleicher
+        Weg wie ProtonPlus). Dieser Eintrag IST der Haken „Die Verwendung
+        eines bestimmten Kompatibilitätswerkzeugs erzwingen" in Steams
+        Eigenschaften. Damit er wirklich gesetzt ist, müssen drei Dinge
+        stimmen:
+
+          1. **Steam darf nicht laufen.** Steam hält config.vdf im Speicher
+             und schreibt sie beim Beenden zurück — ein Eintrag von außen
+             ist danach weg. Ein Neustart hilft deshalb NICHT, er ist genau
+             der Moment, in dem überschrieben wird. Läuft Steam, bietet die
+             App an, es zu beenden.
+          2. **Der interne Tool-Name**, nicht der Ordnername
+             (games_db.compat_mapping_name). Einen unbekannten Namen
+             ignoriert Steam, der Haken bleibt aus.
+          3. **Auch Valves Proton wird eingetragen.** Früher hieß „Standard"
+             „Eintrag entfernen" — Nicht-Steam-Spiele starteten dann ganz
+             ohne Proton.
+
+        Danach wird die Datei noch einmal gelesen. Steht der Name nicht
+        drin, sagt die App das, statt Erfolg zu melden.
         """
-        tool, found, kind = games_db.resolve_steam_tool(proton)
-        if not found:
+        name, err = games_db.compat_mapping_name(proton)
+        if err == "not_installed":
             self._detail_status(tr("games_tool_missing"), "#ebcb8b")
+            return
+        if err == "valve_missing":
+            self._detail_status(tr("games_valve_proton_missing"), "#ebcb8b")
             return
 
         # Vor dem Wechsel sichern anbieten. Steam legt beim naechsten Start
@@ -723,9 +761,43 @@ class GamesTabMixin:
         if not self._offer_config_backup(appid, proton):
             return          # Nutzer hat abgebrochen
 
-        ok, err = games_db.set_steam_compat_tool(appid, tool)
+        if games_db.steam_is_running():
+            if not self._ask_close_steam():
+                self._detail_status(tr("games_use_cancelled_steam"), "#ebcb8b")
+                return
+            self._close_steam_then(
+                lambda a=appid, p=proton, n=name: self._apply_proton(a, p, n))
+            return
+        self._apply_proton(appid, proton, name)
+
+    def _ask_close_steam(self, text_key="games_close_steam_text"):
+        """Rückfrage: Steam beenden, damit die Änderung nicht verloren geht."""
+        import steam_close
+        return steam_close.ask(self, text_key, widen=self._widen_dialog_buttons)
+
+    def _close_steam_then(self, callback, keys=None):
+        """Beendet Steam und ruft ``callback`` auf, sobald es weg ist (steam_close.py)."""
+        import steam_close
+
+        def remember(timer):
+            self._steam_close_timer = timer
+
+        return steam_close.close_then(
+            self, callback, self._detail_status,
+            timeout_ms=self.STEAM_SHUTDOWN_TIMEOUT_MS,
+            poll_ms=self.STEAM_SHUTDOWN_POLL_MS,
+            on_timer=remember, keys=keys)
+
+    def _apply_proton(self, appid, proton, name):
+        """Schreibt den Eintrag (Steam läuft nicht) und prüft das Ergebnis."""
+        ok, err = games_db.set_steam_compat_tool(appid, name)
         if not ok:
             self._detail_status(f"Steam-Config: {err}", "#bf616a")
+            return
+        if games_db.get_steam_compat_tool(appid) != name:
+            log.warning("[Games] CompatToolMapping fuer %s nach dem Schreiben "
+                        "nicht gefunden (erwartet: %s)", appid, name)
+            self._detail_status(tr("games_use_not_saved"), "#bf616a")
             return
 
         version = proton.get("version", "")
@@ -734,12 +806,7 @@ class GamesTabMixin:
         g = self._game_data_for(appid)
         game_name_for_tooltip = g.get("name", "") if g else ""
 
-        if tool is None:
-            msg = tr("games_use_default")
-        else:
-            msg = tr("games_use_applied").format(tool=tool)
-        if games_db.steam_is_running():
-            msg += " " + tr("games_steam_restart_hint")
+        msg = tr("games_use_applied").format(tool=name)
         # Tooltip des ▶-Knopfs auf der Kachel nachziehen (neue Proton-Version)
         tile = self._games_tiles.get(appid)
         if tile is not None and getattr(tile, "_play_btn", None):
@@ -795,7 +862,12 @@ class GamesTabMixin:
 
         msg = tr("games_play_starting").format(name=game.get("name", ""))
         if ok and games_db.steam_is_running():
-            msg += " " + tr("games_steam_restart_hint")
+            # Bei Nicht-Steam-Spielen reicht ein Neustart nicht immer: Steam
+            # schreibt shortcuts.vdf selbst neu, sobald man dort einen
+            # Eintrag bearbeitet, und die Aenderung waere wieder weg.
+            hint = ("games_shortcut_steam_running" if game.get("shortcut")
+                    else "games_steam_restart_hint")
+            msg += " " + tr(hint)
         status(msg + warn, "#a3be8c" if ok else "#ebcb8b")
 
     def _play_game(self, appid, game):
@@ -975,6 +1047,111 @@ class GamesTabMixin:
         QMessageBox.information(self, tr("games_reset_title"),
                                 tr("games_reset_done").format(n=restored))
 
+    # ------------------------------------------------------------------ #
+    #  Bilder (eigene Spiele + Nicht-Steam-Spiele)
+    # ------------------------------------------------------------------ #
+    def _add_image_row(self, box, key, kind):
+        """Zeile „Bild (optional): [Bild wählen …] [Bild entfernen]".
+
+        kind "local"   : Kopie in der App-Config (games.set_local_game_image)
+        kind "shortcut": Steams grid-Ordner — erscheint auch in Steam
+        """
+        row = QHBoxLayout()
+        lbl = QLabel(tr("games_image_label"))
+        lbl.setStyleSheet("color: #7b88a1; font-size: 11px; font-weight: bold; border: none;")
+        if kind == "shortcut":
+            lbl.setToolTip(tr("games_image_shortcut_tip"))
+        row.addWidget(lbl)
+
+        btn_choose = QPushButton(tr("games_image_choose_btn"))
+        btn_choose.setCursor(Qt.PointingHandCursor)
+        btn_choose.setStyleSheet(self._fix_button_style())
+        btn_choose.clicked.connect(lambda _=False, k=key, t=kind: self._choose_game_image(k, t))
+        row.addWidget(btn_choose)
+
+        has_image = games_db.get_game_cover(key, allow_download=False) is not None
+        btn_clear = QPushButton(tr("games_image_remove_btn"))
+        btn_clear.setCursor(Qt.PointingHandCursor)
+        btn_clear.setStyleSheet(self._fix_button_style())
+        btn_clear.setEnabled(has_image)
+        btn_clear.clicked.connect(lambda _=False, k=key, t=kind: self._clear_game_image(k, t))
+        row.addWidget(btn_clear)
+        row.addStretch()
+        box.addLayout(row)
+        self._detail_image_buttons = (btn_choose, btn_clear)
+
+    def _choose_game_image(self, key, kind, path=None):
+        if path is None:
+            from PySide6.QtWidgets import QFileDialog
+            path, _f = QFileDialog.getOpenFileName(
+                self, tr("games_image_dialog_title"), os.path.expanduser("~"),
+                f"{tr('games_image_filter')} (*.png *.jpg *.jpeg)")
+            if not path:
+                return
+        if kind == "local":
+            ok, err = games_db.set_local_game_image(key, path)
+        else:
+            ok, err = games_db.set_shortcut_image(key, path)
+        if not ok:
+            self._detail_status(tr(f"games_image_err_{err}"), "#bf616a")
+            return
+        self._rerender_keep_open(key, tr("games_image_set"))
+
+    def _clear_game_image(self, key, kind):
+        if kind == "local":
+            games_db.clear_local_game_image(key)
+        else:
+            games_db.clear_shortcut_image(key)
+        self._rerender_keep_open(key, tr("games_image_removed"))
+
+    def _rerender_keep_open(self, key, message):
+        """Kacheln neu aufbauen (neues Cover) und das Panel wieder aufklappen."""
+        self._collapse_detail()
+        self.refresh_games_cards()
+        if key in self._games_tiles:
+            self._expand_game(key)
+        self._detail_status(message, "#a3be8c")
+
+    # ------------------------------------------------------------------ #
+    #  Eigenes Windows-Spiel -> Nicht-Steam-Spiel
+    # ------------------------------------------------------------------ #
+    def move_local_game_to_steam(self, gid):
+        """„In Steam eintragen" im Panel eines eigenen .exe-Spiels.
+
+        Der eigene Eintrag wird danach entfernt: sonst stuende dasselbe Spiel
+        zweimal in der Liste, einmal mit und einmal ohne Proton.
+        """
+        entry = games_db.local_game(gid)
+        if entry is None:
+            return
+        if games_db.steam_is_running():
+            if not self._ask_close_steam("games_close_steam_text_add"):
+                self._detail_status(tr("games_add_to_steam_cancelled"), "#ebcb8b")
+                return
+            self._close_steam_then(
+                lambda g=gid: self._do_move_local_to_steam(g),
+                keys={"waiting": "games_add_to_steam_waiting",
+                      "timeout": "games_add_to_steam_timeout",
+                      "failed": "games_add_to_steam_failed_close"})
+            return
+        self._do_move_local_to_steam(gid)
+
+    def _do_move_local_to_steam(self, gid):
+        entry = games_db.local_game(gid)
+        if entry is None:
+            return
+        appid, err = games_db.register_in_steam(
+            entry["name"], entry["exe"], entry.get("launch_options", ""),
+            entry.get("image", ""))
+        if appid is None:
+            self._detail_status(tr(f"games_add_err_{err}"), "#bf616a")
+            return
+        games_db.remove_local_game(gid)
+        self._collapse_detail()
+        self.start_games_scan()
+        QMessageBox.information(self, tr("games_add_to_steam_btn"),
+                                tr("games_local_moved_to_steam").format(name=entry["name"]))
+
     def _build_local_game_detail(self, gid, entry):
         """
         Detail-Panel eines eigenen Spiels.
@@ -1065,6 +1242,25 @@ class GamesTabMixin:
         txt_opts.textEdited.connect(
             lambda text, g=gid: self._save_local_field(g, "launch_options", text))
         box.addWidget(txt_opts)
+
+        self._add_image_row(box, gid, "local")
+
+        # Windows-Programm aus der Zeit vor v1.3.0: nicht still loeschen,
+        # aber sagen, dass es ueber Steam besser geht — und den Weg anbieten.
+        if games_db.is_windows_exe(entry["exe"]):
+            hint_row = QHBoxLayout()
+            lbl_hint = QLabel(tr("games_local_exe_hint"))
+            lbl_hint.setWordWrap(True)
+            lbl_hint.setStyleSheet("color: #ebcb8b; font-size: 11px; border: none;")
+            hint_row.addWidget(lbl_hint, 1)
+            btn_to_steam = QPushButton(tr("games_add_to_steam_btn"))
+            btn_to_steam.setCursor(Qt.PointingHandCursor)
+            btn_to_steam.setToolTip(tr("games_add_to_steam_tip"))
+            btn_to_steam.setStyleSheet(self._fix_button_style())
+            btn_to_steam.clicked.connect(
+                lambda _=False, g=gid: self.move_local_game_to_steam(g))
+            hint_row.addWidget(btn_to_steam)
+            box.addLayout(hint_row)
 
         # --- Entfernen ---
         foot = QHBoxLayout()
@@ -1162,6 +1358,9 @@ class GamesTabMixin:
 
         name_row.addStretch()
         box.addLayout(name_row)
+
+        if game.get("shortcut"):
+            self._add_image_row(box, appid, "shortcut")
 
         # --- Proton-Versionen (gefiltert + Empfehlung zuerst) ---
         lbl_proton = QLabel(tr("games_proton_section"))
@@ -1313,7 +1512,15 @@ class GamesTabMixin:
         # Der finale String wird live neu berechnet und ist genau das, was
         # "Play" in Steams LaunchOptions schreibt.
         params = game.get("launch_params", {})
-        if params and gpu in ("amd", "nvidia"):
+        if game.get("shortcut"):
+            # Nicht-Steam-Spiel: Basis sind die Parameter aus Steam, nicht
+            # GPU-abhaengige Vorgaben.
+            lbl_params = QLabel(tr("games_params_section_shortcut"))
+            self._detail_base_params = params.get("base", "")
+            if self._detail_base_params:
+                lbl_params.setToolTip(tr("games_shortcut_base_tip").format(
+                    params=self._detail_base_params))
+        elif params and gpu in ("amd", "nvidia"):
             gpu_name = tr("games_gpu_amd") if gpu == "amd" else tr("games_gpu_nvidia")
             lbl_params = QLabel(tr("games_params_section").format(gpu=gpu_name))
             self._detail_base_params = params.get(gpu, "")

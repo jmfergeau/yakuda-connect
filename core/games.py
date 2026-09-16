@@ -41,6 +41,7 @@ import subprocess
 
 import vr_environment as venv
 import steam_appinfo
+import steam_shortcuts
 
 from logging_setup import get_logger
 from jsonio import update_json
@@ -825,6 +826,11 @@ def scan_all_steam_games():
         if common is not None and not steam_appinfo.is_playable_type(common):
             continue
         out.append({"appid": app["appid"], "name": app["name"]})
+    # Nicht-Steam-Spiele ("Ein Nicht-Steam-Spiel hinzufügen" in Steam). Sie
+    # stehen nicht in den appmanifests, haben aber eine echte AppID — und
+    # bekommen damit im Panel dieselben Einstellungen wie Steam-Spiele.
+    for sc in steam_shortcuts.list_shortcuts():
+        out.append({"appid": sc["appid"], "name": sc["name"], "shortcut": True})
     out.sort(key=lambda g: g["name"].lower())
     return out
 
@@ -955,6 +961,19 @@ def scan_installed_games():
             tested.add(appid)                 # kuratiertes Profil -> "getestet"
         else:
             untested[appid] = name
+
+    # Nicht-Steam-Spiele kommen NUR ueber einen Handeintrag in die Liste. Eine
+    # automatische VR-Erkennung gibt es fuer sie nicht: Steam fuehrt keine
+    # Kategorie, und der Programmpfad zeigt bei Heroic/Lutris nur auf einen
+    # Starter. Raten wuerde jeden Emulator mit einsammeln.
+    manual_shortcuts = [a for a in manual if steam_shortcuts.is_shortcut_id(a)]
+    if manual_shortcuts:
+        present = {sc["appid"]: sc["name"] for sc in steam_shortcuts.list_shortcuts()}
+        for appid in manual_shortcuts:
+            if appid in hidden or appid not in present:
+                continue                      # entfernt oder in Steam geloescht
+            untested[appid] = present[appid]
+            by_source["manual"] += 1
 
     if fresh:
         save_vr_filecheck_cache(fresh)
@@ -1103,7 +1122,46 @@ def add_manual_steam_appid(appid):
     if not update_json(APP_CONFIG, {"games_manual_steam": current}):
         log.warning("Manuelles Steam-Spiel konnte nicht gespeichert werden.")
         return False
+    if steam_shortcuts.is_shortcut_id(appid):
+        remember_shortcut_base(appid)
     return True
+
+
+# --------------------------------------------------------------------------- #
+#  Nicht-Steam-Spiele: die Startparameter, die der Eintrag schon hatte
+# --------------------------------------------------------------------------- #
+# Bei Nicht-Steam-Spielen sind die Startparameter oft TRAGEND: ein
+# Heroic-Eintrag startet ueber "heroic://launch/...", ein Lutris-Eintrag ueber
+# "lutris:rungameid/12". Der Play-Knopf schreibt die Parameter aus dem Panel
+# zurueck — ohne diese Sicherung waeren sie beim ersten Klick weg und das
+# Spiel startete nie wieder.
+#
+# Gemerkt wird der Stand BEIM EINTRAGEN, und zwar nur einmal. Spaeter aus der
+# Datei gelesen, stuenden dort schon unsere eigenen Schalter (gamemoderun
+# ...) — und ein abgeschalteter Schalter liesse sich nie mehr entfernen.
+# Der Wert wird im Panel als Basis-Parameter verwendet, genau wie die
+# hinterlegten Parameter eines kuratierten Spiels.
+def remember_shortcut_base(appid):
+    appid = str(appid)
+    bases = _load_app_config().get("games_shortcut_base", {})
+    if not isinstance(bases, dict):
+        bases = {}
+    if appid in bases:
+        return bases[appid]
+    sc = steam_shortcuts.get(appid)
+    base = (sc or {}).get("launch_options", "") or ""
+    bases[appid] = base
+    if not update_json(APP_CONFIG, {"games_shortcut_base": bases}):
+        log.warning("Startparameter des Nicht-Steam-Spiels konnten nicht gemerkt werden.")
+    return base
+
+
+def shortcut_base_options(appid):
+    """Gemerkte Original-Startparameter (merkt sie beim ersten Aufruf)."""
+    bases = _load_app_config().get("games_shortcut_base", {})
+    if isinstance(bases, dict) and str(appid) in bases:
+        return bases[str(appid)] or ""
+    return remember_shortcut_base(appid)
 
 
 def remove_manual_steam_appid(appid):
@@ -1232,6 +1290,7 @@ def load_local_games():
             "name": name,
             "exe": exe,
             "launch_options": str(entry.get("launch_options", "") or "").strip(),
+            "image": str(entry.get("image", "") or "").strip(),
         })
     out.sort(key=lambda g: g["name"].lower())
     return out
@@ -1258,31 +1317,186 @@ def _next_local_id(entries):
     return f"{LOCAL_PREFIX}{n}"
 
 
-def add_local_game(name, exe, launch_options=""):
+def validate_game_input(name, exe, image=""):
     """
-    Legt ein eigenes Spiel an.
-    Rückgabe: (ok, kennung_oder_fehlerschlüssel)
-      Fehlerschlüssel: "no_name" | "no_exe" | "not_found" | "save_failed"
-    Die Schlüssel sind absichtlich keine fertigen Sätze — die Oberfläche
-    übersetzt sie, damit die Meldung in der eingestellten Sprache erscheint.
+    Prueft Name, Programmdatei und (optionales) Bild.
+    Rückgabe: (ok, fehlerschlüssel, exe_absolut)
+      Fehlerschlüssel: "no_name" | "no_exe" | "not_found" | "bad_image"
+    Gemeinsam fuer „Hinzufügen" und „In Steam eintragen" — beide sollen
+    dieselben Fehler gleich melden.
     """
     name = (name or "").strip()
     exe = (exe or "").strip()
     if not name:
-        return False, "no_name"
+        return False, "no_name", ""
     if not exe:
-        return False, "no_exe"
+        return False, "no_exe", ""
     exe = os.path.abspath(os.path.expanduser(exe))
     if not os.path.isfile(exe):
-        return False, "not_found"
+        return False, "not_found", exe
+    image = (image or "").strip()
+    if image and (not os.path.isfile(os.path.expanduser(image))
+                  or os.path.splitext(image)[1].lower() not in IMAGE_EXTS):
+        return False, "bad_image", exe
+    return True, "", exe
+
+
+def is_windows_exe(path):
+    """Windows-Programm? Die laufen fuer VR nur ueber Steam+Proton sinnvoll."""
+    return str(path or "").strip().lower().endswith(".exe")
+
+
+def add_local_game(name, exe, launch_options="", image=""):
+    """
+    Legt ein eigenes Spiel an.
+    Rückgabe: (ok, kennung_oder_fehlerschlüssel)
+      Fehlerschlüssel: "no_name" | "no_exe" | "not_found" | "bad_image" |
+                       "save_failed"
+    Die Schlüssel sind absichtlich keine fertigen Sätze — die Oberfläche
+    übersetzt sie, damit die Meldung in der eingestellten Sprache erscheint.
+    """
+    ok, err, exe = validate_game_input(name, exe, image)
+    if not ok:
+        return False, err
 
     entries = load_local_games()
     gid = _next_local_id(entries)
-    entries.append({"id": gid, "name": name, "exe": exe,
-                    "launch_options": (launch_options or "").strip()})
+    stored = _store_local_image(image) if (image or "").strip() else ""
+    entries.append({"id": gid, "name": name.strip(), "exe": exe,
+                    "launch_options": (launch_options or "").strip(),
+                    "image": stored})
     if not _save_local_games(entries):
+        _delete_local_image(stored)
         return False, "save_failed"
     return True, gid
+
+
+# --------------------------------------------------------------------------- #
+#  Bilder eigener Spiele
+# --------------------------------------------------------------------------- #
+# Das gewaehlte Bild wird KOPIERT, nicht nur verlinkt: ein Bild aus dem
+# Download-Ordner ist sonst nach dem naechsten Aufraeumen weg, und die Kachel
+# faellt still auf den Platzhalter zurueck.
+#
+# Der Dateiname ist zufaellig und nicht an die Kennung ("local:3") gebunden.
+# Kennungen werden nach dem Loeschen wiederverwendet — ein neues Spiel mit
+# derselben Nummer bekaeme sonst das Bild des alten.
+IMAGE_EXTS = steam_shortcuts.IMAGE_EXTS
+
+
+def local_images_dir():
+    return os.path.join(os.path.dirname(APP_CONFIG), "covers")
+
+
+def _store_local_image(source):
+    import uuid
+    source = os.path.expanduser((source or "").strip())
+    ext = os.path.splitext(source)[1].lower()
+    if ext not in IMAGE_EXTS or not os.path.isfile(source):
+        return ""
+    dest_dir = local_images_dir()
+    dest = os.path.join(dest_dir, f"local-{uuid.uuid4().hex[:12]}{ext}")
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.copyfile(source, dest)
+    except OSError as exc:
+        log.warning("Bild konnte nicht uebernommen werden: %s", exc)
+        return ""
+    return dest
+
+
+def _delete_local_image(path):
+    """Nur Kopien im eigenen Ordner loeschen — nie ein Bild des Nutzers."""
+    if not path:
+        return
+    real = os.path.realpath(path)
+    if os.path.dirname(real) != os.path.realpath(local_images_dir()):
+        return
+    try:
+        os.remove(real)
+    except OSError:
+        pass
+
+
+def set_local_game_image(gid, source):
+    """Bild eines eigenen Spiels setzen. Rückgabe: (ok, fehlerschlüssel)."""
+    source = os.path.expanduser((source or "").strip())
+    if os.path.splitext(source)[1].lower() not in IMAGE_EXTS:
+        return False, "bad_type"
+    if not os.path.isfile(source):
+        return False, "not_found"
+    entries = _raw_local_entries()
+    for entry in entries:
+        if str(entry.get("id")) != str(gid):
+            continue
+        stored = _store_local_image(source)
+        if not stored:
+            return False, "write_failed"
+        old = entry.get("image", "")
+        entry["image"] = stored
+        if not _save_local_games(entries):
+            _delete_local_image(stored)
+            return False, "write_failed"
+        _delete_local_image(old)
+        return True, ""
+    return False, "not_found"
+
+
+def clear_local_game_image(gid):
+    entries = _raw_local_entries()
+    for entry in entries:
+        if str(entry.get("id")) == str(gid) and entry.get("image"):
+            old = entry["image"]
+            entry["image"] = ""
+            if _save_local_games(entries):
+                _delete_local_image(old)
+                return True
+    return False
+
+
+def _raw_local_entries():
+    """Die Eintraege so, wie sie in der Config stehen (fuer Aenderungen)."""
+    return [dict(e) for e in load_local_games()]
+
+
+# --------------------------------------------------------------------------- #
+#  Bilder von Nicht-Steam-Spielen
+# --------------------------------------------------------------------------- #
+def set_shortcut_image(appid, source):
+    """Bild in Steams grid-Ordner — sieht dann auch Steam selbst."""
+    return steam_shortcuts.set_grid_image(appid, os.path.expanduser((source or "").strip()))
+
+
+def clear_shortcut_image(appid):
+    return steam_shortcuts.clear_grid_image(appid)
+
+
+# --------------------------------------------------------------------------- #
+#  „In Steam eintragen"
+# --------------------------------------------------------------------------- #
+def register_in_steam(name, exe, launch_options="", image=""):
+    """
+    Traegt ein Programm als Nicht-Steam-Spiel in Steam ein und holt es
+    sofort in die VR-Liste. STEAM DARF NICHT LAUFEN (siehe steam_close.py).
+
+    Rückgabe: (appid, fehlerschlüssel)
+      Fehlerschlüssel: wie validate_game_input, dazu die aus
+      steam_shortcuts.add_shortcut ("no_account", "unreadable",
+      "write_failed"). "exists" gilt als Erfolg: das Spiel steht schon in
+      Steam und wird nur (wieder) in die Liste geholt.
+    """
+    ok, err, exe = validate_game_input(name, exe, image)
+    if not ok:
+        return None, err
+    appid, err = steam_shortcuts.add_shortcut(name.strip(), exe, launch_options or "")
+    if err not in ("", "exists"):
+        return None, err
+    add_manual_steam_appid(appid)
+    if (image or "").strip():
+        img_ok, img_err = set_shortcut_image(appid, image)
+        if not img_ok:
+            log.warning("Bild fuer %s nicht gesetzt: %s", appid, img_err)
+    return appid, err
 
 
 def update_local_game(gid, **fields):
@@ -1300,12 +1514,17 @@ def update_local_game(gid, **fields):
 
 
 def remove_local_game(gid):
-    """Löscht ein eigenes Spiel. Die Datei auf der Platte bleibt unberührt."""
+    """Löscht ein eigenes Spiel. Die Datei auf der Platte bleibt unberührt —
+    nur die von uns angelegte Bildkopie verschwindet mit dem Eintrag."""
     entries = load_local_games()
     rest = [e for e in entries if e["id"] != str(gid)]
     if len(rest) == len(entries):
         return False
-    return _save_local_games(rest)
+    gone = next(e for e in entries if e["id"] == str(gid))
+    if not _save_local_games(rest):
+        return False
+    _delete_local_image(gone.get("image", ""))
+    return True
 
 
 def local_game(gid):
@@ -1587,12 +1806,21 @@ def get_game_cover(appid, allow_download=True):
     # Eigene Spiele haben keine AppID und damit auch kein Steam-Cover. Ohne
     # diese Abfrage wuerde die Kachel eines eigenen Eintrags einen Download
     # auf https://.../store_item_assets/steam/apps/local:3/... ausloesen —
-    # ein Netzwerkaufruf, der nur scheitern kann.
+    # ein Netzwerkaufruf, der nur scheitern kann. Ihr Bild kommt, wenn der
+    # Nutzer eines gesetzt hat, aus der Config.
+    if is_local_id(appid):
+        entry = local_game(appid)
+        image = (entry or {}).get("image", "")
+        return image if image and os.path.isfile(image) else None
     if not steam_appinfo.is_steam_appid(appid):
         return None
     local = find_game_cover(appid)
     if local:
         return local
+    # Nicht-Steam-Spiele gibt es auf Steams Bildserver nicht. Ihr Bild kommt
+    # nur aus dem Grid-Ordner (von Hand oder per SteamGridDB gesetzt).
+    if steam_shortcuts.is_shortcut_id(appid):
+        return None
     cached = cached_cover_path(appid)
     if os.path.isfile(cached) and os.path.getsize(cached) > 0:
         return cached
@@ -1635,10 +1863,13 @@ def find_game_cover(appid):
             try:
                 for uid in os.listdir(userdata):
                     grid = os.path.join(userdata, uid, "config", "grid")
-                    for ext in ("png", "jpg", "jpeg"):
-                        p = os.path.join(grid, f"{appid}p.{ext}")
-                        if os.path.isfile(p):
-                            return p
+                    # Hochkant zuerst; Nicht-Steam-Spiele haben oft nur
+                    # das Querformat (<appid>.png) oder das Hero-Bild.
+                    for stem in (f"{appid}p", f"{appid}", f"{appid}_hero"):
+                        for ext in ("png", "jpg", "jpeg"):
+                            p = os.path.join(grid, f"{stem}.{ext}")
+                            if os.path.isfile(p):
+                                return p
             except Exception as exc:
                 log.debug("find_game_cover: ignoriert — %s", exc)
     return None
@@ -1691,10 +1922,12 @@ def protonplus_install_cmd(runner_id):
 # ProtonPlus/ProtonUp-Qt):
 #   * Proton-Version : config/config.vdf        -> CompatToolMapping
 #   * Startparameter : userdata/<uid>/config/localconfig.vdf -> LaunchOptions
-# Danach reicht ein `steam -applaunch <appid>`. Läuft Steam gerade, greifen
-# die Änderungen erst nach einem Steam-Neustart (Steam überschreibt seine
-# VDFs beim Beenden) — die UI weist darauf hin. Vor jedem Schreiben wird
+# Danach reicht ein `steam -applaunch <appid>`. Vor jedem Schreiben wird
 # eine .bak-Sicherung mit Zeitstempel angelegt.
+#
+# Läuft Steam, hält es seine VDFs im Speicher und schreibt sie beim Beenden
+# zurück — eine Änderung von außen ist danach weg, auch nach einem
+# "Neustart". "Use" beendet Steam deshalb vorher (games_mixin._use_proton).
 
 def _vdf_find_block(text, key, start=0, end=None):
     """
@@ -1777,6 +2010,20 @@ def compat_tools_dirs():
     return dirs
 
 
+# Von Distributionspaketen installierte Tools (CachyOS: proton-cachyos aus
+# dem Repo, Arch/AUR: proton-ge-custom-bin). Steam liest diese Ordner
+# zusaetzlich zu seinem eigenen compatibilitytools.d. Installiert wird dort
+# nie etwas — compat_tools_install_dir() schaut sie deshalb nicht an.
+SYSTEM_COMPAT_TOOLS_DIRS = [
+    "/usr/share/steam/compatibilitytools.d",
+    "/usr/local/share/steam/compatibilitytools.d",
+]
+
+
+def system_compat_tools_dirs():
+    return [d for d in SYSTEM_COMPAT_TOOLS_DIRS if os.path.isdir(d)]
+
+
 def compat_tools_install_dir():
     """Das compatibilitytools.d, in das ein manueller Build entpackt wird.
 
@@ -1838,7 +2085,7 @@ def installed_builds(proton):
         prefixes = _TOOL_PREFIXES.get(runner, [version])
     excludes = _TOOL_EXCLUDES.get(runner, []) if runner else []
     found = []
-    for d in compat_tools_dirs():
+    for d in compat_tools_dirs() + system_compat_tools_dirs():
         try:
             names = os.listdir(d)
         except Exception:
@@ -1861,7 +2108,9 @@ def resolve_steam_tool(proton):
     Übersetzt einen Proton-Eintrag in den Tool-Namen für Steams
     CompatToolMapping (= Ordnername in compatibilitytools.d).
     Rückgabe: (tool_name_oder_None, gefunden: bool, art: str)
-      tool None + gefunden True  -> Steam-Standard (Mapping entfernen)
+      tool None + gefunden True  -> Valves Proton (Steam bringt es selbst mit;
+                                    welcher Name in CompatToolMapping gehoert,
+                                    klaert compat_mapping_name)
       gefunden False             -> Version nicht installiert
 
     Es gewinnt immer die NEUESTE installierte passende Version, nicht die in
@@ -1955,6 +2204,161 @@ def set_steam_compat_tool(appid, tool_name):
         return False, str(e)
 
 
+def get_steam_compat_tool(appid):
+    """Der Tool-Name, der fuer dieses Spiel in CompatToolMapping steht, oder None.
+
+    Genau dieser Eintrag ist der Haken „Die Verwendung eines bestimmten
+    Kompatibilitaetswerkzeugs erzwingen" in Steams Eigenschaften: steht dort
+    ein Name, den Steam kennt, ist der Haken gesetzt.
+    """
+    path = _config_vdf_path()
+    if not path:
+        return None
+    try:
+        with open(path, errors="ignore") as f:
+            text = f.read()
+    except OSError:
+        return None
+    steam_span = (_vdf_descend(text, ["InstallConfigStore", "Software", "Valve", "Steam"])
+                  or _vdf_descend(text, ["Software", "Valve", "Steam"]))
+    if steam_span is None:
+        return None
+    mapping = _vdf_find_block(text, "CompatToolMapping", steam_span[0] + 1, steam_span[1])
+    if mapping is None:
+        return None
+    app_span = _vdf_find_block(text, str(appid), mapping[0] + 1, mapping[1])
+    if app_span is None:
+        return None
+    m = re.search(r'"name"\s+"((?:[^"\\]|\\.)*)"', text[app_span[0]:app_span[1]], re.IGNORECASE)
+    return m.group(1) if m and m.group(1) else None
+
+
+# --------------------------------------------------------------------------- #
+#  Welcher Name gehoert in CompatToolMapping?
+# --------------------------------------------------------------------------- #
+# Steam kennt ein Tool nicht unter seinem Ordnernamen, sondern unter dem
+# internen Namen aus seiner compatibilitytool.vdf. Meist ist beides gleich
+# (GE-Proton10-26), aber nicht immer — Distributionspakete benennen den
+# Ordner gern schlicht "proton-cachyos". Steht in CompatToolMapping ein
+# Name, den Steam nicht kennt, bleibt der Haken in Steam AUS und das Spiel
+# laeuft ohne Proton.
+def _compat_tool_internal_name(folder):
+    for d in compat_tools_dirs() + system_compat_tools_dirs():
+        vdf = os.path.join(d, folder, "compatibilitytool.vdf")
+        if not os.path.isfile(vdf):
+            continue
+        try:
+            with open(vdf, errors="ignore") as f:
+                text = f.read()
+        except OSError:
+            continue
+        # Kommentare entfernen: GE schreibt hinter den Namen
+        # '// Internal name of this tool' — zwischen Name und '{' haette die
+        # Suche unten sonst nichts gefunden und still den Ordnernamen genommen.
+        text = re.sub(r"//[^\n]*", "", text)
+        span = _vdf_find_block(text, "compat_tools")
+        if span is None:
+            continue
+        m = re.search(r'"([^"]+)"\s*\{', text[span[0] + 1:span[1]])
+        if m:
+            return m.group(1)
+    return folder
+
+
+# Valves eigene Proton-Versionen sind Steam-Apps (steamapps/common/Proton
+# 10.0) und haben keine compatibilitytool.vdf. Ihre internen Namen folgen
+# einem festen Schema: "Proton 10.0" -> proton_10, "Proton 5.13" ->
+# proton_513, dazu proton_experimental und proton_hotfix.
+_VALVE_SPECIAL = {"proton - experimental": "proton_experimental",
+                  "proton experimental": "proton_experimental",
+                  "proton hotfix": "proton_hotfix"}
+_VALVE_NUMBERED = re.compile(r"^proton (\d+)\.(\d+)$", re.IGNORECASE)
+
+
+def _valve_internal_name(folder):
+    low = folder.strip().lower()
+    if low in _VALVE_SPECIAL:
+        return _VALVE_SPECIAL[low]
+    m = _VALVE_NUMBERED.match(low)
+    if not m:
+        return None
+    major, minor = m.groups()
+    return f"proton_{major}" if minor == "0" else f"proton_{major}{minor}"
+
+
+def installed_valve_protons():
+    """[(interner Name, Hauptversion oder None)] aller installierten Valve-Protons."""
+    found = []
+    for sa in _steamapps_dirs():
+        common = os.path.join(sa, "common")
+        try:
+            names = os.listdir(common)
+        except OSError:
+            continue
+        for name in names:
+            internal = _valve_internal_name(name)
+            if not internal or not os.path.isfile(
+                    os.path.join(common, name, "toolmanifest.vdf")):
+                continue
+            m = _VALVE_NUMBERED.match(name.strip())
+            major = int(m.group(1)) if m else None
+            if all(internal != f[0] for f in found):
+                found.append((internal, major))
+    return found
+
+
+def valve_proton_mapping_name(proton):
+    """
+    Interner Name fuer „Proton N (Standard)" — oder None, wenn kein
+    Valve-Proton installiert ist.
+
+    Bevorzugt die Hauptversion aus dem Eintrag (Proton 11 → proton_11),
+    sonst die neueste installierte nummerierte, sonst Experimental.
+    """
+    installed = installed_valve_protons()
+    if not installed:
+        return None
+    m = re.search(r"(\d+)", proton.get("version", "") or "")
+    wanted = int(m.group(1)) if m else None
+    numbered = sorted((f for f in installed if f[1] is not None), key=lambda f: f[1])
+    for internal, major in numbered:
+        if major == wanted:
+            return internal
+    if numbered:
+        return numbered[-1][0]
+    names = [f[0] for f in installed]
+    return "proton_experimental" if "proton_experimental" in names else names[0]
+
+
+def compat_mapping_name(proton):
+    """
+    Was „Use" in CompatToolMapping schreibt. Rueckgabe: (name, fehler)
+      name   : interner Tool-Name — der Haken in Steam ist damit IMMER gesetzt
+      fehler : "not_installed" | "valve_missing" | ""
+
+    Frueher bedeutete „Proton N (Standard)": Eintrag entfernen, Steam nimmt
+    sein Standard-Proton. Fuer Windows-Spiele aus dem Store stimmt das, fuer
+    Nicht-Steam-Spiele nicht — ohne Eintrag startet Steam die .exe ganz ohne
+    Proton. Deshalb wird jetzt auch Valves Proton ausdruecklich eingetragen.
+    """
+    folder, found, kind = resolve_steam_tool(proton)
+    if not found:
+        return None, "not_installed"
+    if kind == "steam_default":
+        name = valve_proton_mapping_name(proton)
+        return (name, "") if name else (None, "valve_missing")
+    return _compat_tool_internal_name(folder), ""
+
+
+def steam_shutdown_cmd():
+    """Befehl, um den laufenden Steam-Client sauber zu beenden."""
+    if shutil.which("steam"):
+        return ["steam", "-shutdown"]
+    if venv.steam_is_flatpak() and shutil.which("flatpak"):
+        return ["flatpak", "run", "com.valvesoftware.Steam", "-shutdown"]
+    return None
+
+
 def set_steam_launch_options(appid, options):
     """
     Schreibt die Startparameter eines Spiels in ALLE gefundenen
@@ -1963,6 +2367,9 @@ def set_steam_launch_options(appid, options):
     Datei geschrieben wurde.
     """
     appid = str(appid)
+    if steam_shortcuts.is_shortcut_id(appid):
+        # Nicht-Steam-Spiele: das Feld steht in shortcuts.vdf (binaer).
+        return steam_shortcuts.set_launch_options(appid, options)
     wrote, last_err = False, "localconfig.vdf nicht gefunden"
     for root in venv.steam_data_roots():
         userdata = os.path.join(root, "userdata")
@@ -2005,6 +2412,17 @@ def set_steam_launch_options(appid, options):
 def steam_launch_cmd(appid):
     """Befehl (Liste), um ein Spiel über den Steam-Client zu starten."""
     appid = str(appid)
+    if steam_shortcuts.is_shortcut_id(appid):
+        # -applaunch kennt nur echte Steam-Spiele. Nicht-Steam-Spiele startet
+        # Steam ausschliesslich ueber die 64-Bit-Spiel-ID.
+        url = f"steam://rungameid/{steam_shortcuts.game_id(appid)}"
+        if shutil.which("steam"):
+            return ["steam", url]
+        if venv.steam_is_flatpak() and shutil.which("flatpak"):
+            return ["flatpak", "run", "com.valvesoftware.Steam", url]
+        if shutil.which("xdg-open"):
+            return ["xdg-open", url]
+        return None
     if shutil.which("steam"):
         return ["steam", "-applaunch", appid]
     if venv.steam_is_flatpak() and shutil.which("flatpak"):

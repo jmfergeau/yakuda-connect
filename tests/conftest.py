@@ -35,6 +35,9 @@ import os
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Kein echter Server-Stopp und kein Waechter-Prozess aus Tests heraus —
+# siehe core/exit_guard.py (DISABLE_ENV).
+os.environ.setdefault("YAKUDA_NO_EXIT_GUARD", "1")
 
 # Haelt die QApplication am Leben, bis der Prozess endet. NICHT entfernen,
 # auch wenn keine andere Stelle sie liest — siehe Modul-Docstring.

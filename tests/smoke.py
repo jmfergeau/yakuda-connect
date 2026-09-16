@@ -39,6 +39,9 @@ sys.path.insert(0, str(ROOT / "core"))
 sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Das Fenster laeuft hier mit echter Config: ohne diesen Schalter wuerde
+# w.close() auf einem Entwicklerrechner den laufenden WiVRn-Server beenden.
+os.environ.setdefault("YAKUDA_NO_EXIT_GUARD", "1")
 
 _fails = []
 _checks = 0

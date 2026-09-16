@@ -250,10 +250,15 @@ class TestNewestProtonWins(unittest.TestCase):
         self.games_db = games_db
         self.tmp = tempfile.mkdtemp(prefix="ct")
         self._orig = games_db.compat_tools_dirs
+        self._orig_sys = games_db.system_compat_tools_dirs
         games_db.compat_tools_dirs = lambda: [self.tmp]
+        # /usr/share/steam/compatibilitytools.d eines Entwicklerrechners
+        # (CachyOS: proton-cachyos aus dem Repo) darf hier nicht mitzaehlen.
+        games_db.system_compat_tools_dirs = lambda: []
 
     def tearDown(self):
         self.games_db.compat_tools_dirs = self._orig
+        self.games_db.system_compat_tools_dirs = self._orig_sys
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _install(self, *names):

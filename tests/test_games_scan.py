@@ -617,3 +617,71 @@ def test_thief_vr_hat_ein_bild_hinterlegt():
     """Regression zum Bericht 'Thief VR hat kein Bild'."""
     pic = games_db.GAMES["2800080"].get("picture", "")
     assert pic.startswith("https://") and pic.endswith(".jpg")
+
+
+# --------------------------------------------------------------------------- #
+#  Bilder eigener Spiele
+# --------------------------------------------------------------------------- #
+def _img(path):
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+    return str(path)
+
+
+@pytest.fixture
+def local_setup(tmp_path, monkeypatch):
+    monkeypatch.setattr(games_db, "APP_CONFIG", str(tmp_path / "cfg" / "config.json"))
+    (tmp_path / "cfg").mkdir()
+    exe = tmp_path / "spiel.sh"
+    exe.write_text("#!/bin/sh\n")
+    return tmp_path, str(exe)
+
+
+def test_bild_wird_kopiert_nicht_verlinkt(local_setup):
+    tmp, exe = local_setup
+    src = _img(tmp / "download.png")
+    ok, gid = games_db.add_local_game("Spiel", exe, "", src)
+    assert ok
+    stored = games_db.local_game(gid)["image"]
+    assert stored != src and os.path.dirname(stored) == games_db.local_images_dir()
+    os.remove(src)                                     # Downloads aufgeraeumt
+    assert games_db.get_game_cover(gid) == stored
+
+
+def test_bild_wechseln_und_entfernen_loescht_nur_eigene_kopie(local_setup):
+    tmp, exe = local_setup
+    ok, gid = games_db.add_local_game("Spiel", exe)
+    first_src = _img(tmp / "a.png")
+    assert games_db.set_local_game_image(gid, first_src) == (True, "")
+    first = games_db.local_game(gid)["image"]
+    assert games_db.set_local_game_image(gid, _img(tmp / "b.jpg")) == (True, "")
+    assert not os.path.exists(first), "alte Kopie bleibt liegen"
+    assert os.path.exists(first_src), "Originalbild des Nutzers geloescht"
+    second = games_db.local_game(gid)["image"]
+    games_db.clear_local_game_image(gid)
+    assert not os.path.exists(second)
+    assert games_db.get_game_cover(gid) is None
+
+
+def test_entfernen_des_spiels_raeumt_bild_auf(local_setup):
+    tmp, exe = local_setup
+    ok, gid = games_db.add_local_game("Spiel", exe, "", _img(tmp / "a.png"))
+    stored = games_db.local_game(gid)["image"]
+    games_db.remove_local_game(gid)
+    assert not os.path.exists(stored)
+    # Kennung wird wiederverwendet — das neue Spiel erbt kein Bild.
+    ok, gid2 = games_db.add_local_game("Anderes", exe)
+    assert gid2 == gid and games_db.get_game_cover(gid2) is None
+
+
+def test_falsches_bild_wird_abgelehnt(local_setup):
+    tmp, exe = local_setup
+    gif = tmp / "x.gif"
+    gif.write_bytes(b"GIF89a")
+    assert games_db.add_local_game("Spiel", exe, "", str(gif)) == (False, "bad_image")
+    ok, gid = games_db.add_local_game("Spiel", exe)
+    assert games_db.set_local_game_image(gid, str(gif)) == (False, "bad_type")
+
+
+def test_exe_erkennung():
+    assert games_db.is_windows_exe("/a/Spiel.EXE")
+    assert not games_db.is_windows_exe("/a/spiel.x86_64")
