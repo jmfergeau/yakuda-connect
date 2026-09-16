@@ -136,5 +136,5 @@ def manual_commands(permanent):
         f"sudo tee {SYSCTL_FILE} > /dev/null <<'EOF'",
         FILE_CONTENT.rstrip("\n"),
         "EOF",
-        f"sudo sysctl --system",
+        "sudo sysctl --system",
     ]

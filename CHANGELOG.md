@@ -1,8 +1,112 @@
 # Changelog - Yakuda Connect
 
-### 🚀 v1.2.8 2026-09-15
+### 🚀 v1.2.9
 
-#### 🇩🇪 Deutsch-
+#### 🇩🇪 Deutsch
+
+**Der Games-Tab ist überarbeitet: Erkennung, Auto-Scan, eigene Spiele.**
+
+* **VR-Spiele werden jetzt so erkannt, wie Steam selbst es tut.** Bisher wurde geraten: für jedes installierte Spiel lief ein Verzeichnis-Durchlauf auf der Suche nach `openvr_api.dll` oder einem `openxr_loader`. Das war langsam (bei großen Bibliotheken zweistellige Sekunden) und in beide Richtungen ungenau.
+* **Neue Datenquelle: `appcache/appinfo.vdf` (neues Modul `core/steam_appinfo.py`).** Steams eigener PICS-Zwischenspeicher — genau das, was hinter dem VR-Filter in der Steam-Bibliothek steckt. Liegt lokal auf der Platte: kein Netz, kein Steam-Login, kein API-Schlüssel. Beide Formatversionen (v40 mit Zeichenketten-Schlüsseln, v41 mit Zeichenketten-Tabelle) werden gelesen; nicht gesuchte Apps werden im Datenstrom übersprungen statt zerlegt, deshalb bleibt der Aufruf auch bei einer großen Datei schnell.
+* **Drei ODER-verknüpfte Signale aus derselben Datei:** die `*vrsupport`-Felder (`openvrsupport`, `onlyvrsupport`, `openxrsupport`, `othervrsupport*`), Valves Kategorien 31/53/54 (VR Support / VR Supported / VR Only) und `playareavr`. Kein Signal deckt für sich alles ab — die Felder sind gewachsen und bei nachträglich um VR ergänzten Titeln oft nicht gesetzt, die Kategorie hängt dagegen an der Store-Angabe des Entwicklers.
+* **Kategorie 52 (Tracked Controller Support) zählt bewusst NICHT.** Sie heißt nur, dass ein Spiel mit VR-Controllern umgehen kann. Das allein sagt nichts darüber, ob es in VR läuft.
+* **Der User-Tag „VR" (tagid 21978) wird ebenfalls NICHT ausgewertet.** Er wird von Spielern vergeben und steht unter anderem an OBS Studio, VoiceAttack, BeamNG.drive und mehreren Visual Novels. Als Signal wäre er unbrauchbar.
+* **Werkzeuge, DLC und Soundtracks fliegen über `common/type` raus**, statt am Namen erkannt zu werden. Steam schreibt den Typ selbst hin.
+* **Die alte Dateierkennung bleibt als zweite Quelle** — für alles, was Steam nicht kennzeichnet. Dadurch kann die Liste nie kürzer sein als vorher.
+* **Damit das bezahlbar bleibt, wird jedes Ergebnis gecacht** (Schlüssel: AppID + Änderungszeit des Installationsordners). Der teure Verzeichnis-Durchlauf läuft einmal je Spiel; danach ist der Scan sofort da. Aktualisiert Steam ein Spiel, springt die Änderungszeit und es wird neu geprüft — ein Titel, der VR nachrüstet, taucht von selbst auf. Eine Cache-Version entwertet alte Ergebnisse, wenn sich die Erkennung ändert.
+* **Was Steam schon beantwortet hat, wird nicht nochmal durchsucht.** Der teure Zweig läuft nur für Spiele, zu denen Steams Daten schweigen.
+
+**Auto-Scan**
+
+* **Der Tab scannt beim Öffnen selbst.** Den „Spiele scannen"-Knopf haben viele schlicht übersehen und standen vor einer unvollständigen Liste — der häufigste Grund für „erkennt meine Spiele nicht". Jetzt wird zuerst der Cache angezeigt und dann im Hintergrund nachgesehen. Standardmäßig an, abschaltbar unter Einstellungen → Allgemein → Spiele.
+* **Die Kacheln werden nur bei einer echten Änderung neu gebaut.** Sonst würde ein aufgeklapptes Spiel bei jedem Tab-Wechsel zuklappen. Verglichen wird über eine Signatur aus AppIDs und Namen; benennt Steam ein Spiel um, zieht die Kachel nach.
+* **Der Scan-Knopf bleibt währenddessen bedienbar.** Ein Vorgang, den der Nutzer nicht angestoßen hat, darf ihm nicht die Oberfläche sperren.
+
+**„+ Spiel hinzufügen"**
+
+* **Neuer Knopf mit zweispaltigem Dialog (`core/games_add_dialog.py`).** Das Ventil neben der Erkennung: die bleibt streng, und alles, was Steam nicht (oder falsch) kennzeichnet, trägt man hier selbst ein.
+* **Option 1 — Steam-Spiel:** ein durchsuchbares Auswahlfeld über ALLE installierten Steam-Spiele, unabhängig von der VR-Kennzeichnung. Gesucht wird nach Wortteilen statt nach dem Anfang („saber" findet „Beat Saber"). Bereits eingetragene Spiele bleiben sichtbar und werden gekennzeichnet. Ein Handeintrag überlebt jeden Neuscan und ist über einen Knopf im Detail-Panel zurücknehmbar.
+* **Option 2 — Eigenes Spiel:** Name, Pfad zur Programmdatei mit „Durchsuchen ..." und optionale Startparameter. Unterstützt native Binaries, Unity-Builds (`.x86_64`/`.x86`), AppImages, Start-Skripte (`.sh`) und Windows-Programme (`.exe`) über Wine.
+* **Eigene Spiele bekommen eine eigene Sektion und ein schlankeres Panel.** Ohne AppID gibt es kein CompatToolMapping, keine Proton-Auswahl und keine Steam-Startparameter — diese Bedienelemente anzuzeigen wäre eine Zusage, die für so einen Eintrag nicht einzuhalten ist.
+* **Windows-Programme laufen über Wine, nicht über Proton.** Proton braucht ein von Steam verwaltetes Prefix samt AppID. Fehlt Wine, sagt die App das, statt kommentarlos nichts zu tun.
+* **Das Arbeitsverzeichnis wird auf den Ordner der Programmdatei gesetzt.** Unity- und Godot-Builds suchen ihre Datenordner relativ dazu und starten sonst mit schwarzem Bild.
+* **Fehlt die Programmdatei, steht das im Panel** und nicht erst beim Startversuch. Nach einem Spiele-Umzug ist das der Normalfall.
+* **Kacheln eigener Spiele lösen keinen Cover-Download aus** — sonst liefe für jeden Eintrag eine Anfrage an Steams Bildserver mit `local:3` als AppID.
+
+**Spiele aus der Liste entfernen**
+
+* **Neu: „Entfernen" im aufgeklappten Panel**, direkt neben „Config zurückspielen". Nimmt ein Spiel dauerhaft aus der VR-Liste — die Erkennung liegt gelegentlich daneben.
+* **Die Rückfrage sagt, was NICHT passiert:** das Spiel bleibt installiert, nur der Eintrag verschwindet. Ein Knopf mit der Aufschrift „Entfernen" neben einer Spielekachel liest sich sonst leicht als „deinstallieren".
+* **Zwei Wege zurück:** das Spiel über „+ Spiel hinzufügen" wieder eintragen, oder **Einstellungen → Allgemein → Spiele → „Games-Tab zurücksetzen"**.
+* **Ein Handeintrag hebt das Entfernen auf und umgekehrt.** Sonst stünden zwei gegensätzliche Wünsche in der Config, und welcher gewinnt, wäre eine Frage der Auswertungsreihenfolge statt einer Entscheidung des Nutzers.
+
+**Kleineres**
+
+* **Neuer Discord-Server:** `https://discord.gg/ShNKvvZu74` (gepflegt in `core/main.py`, Zeile 50).
+* **Thief VR: Legacy of Shadow hat wieder eine Kachelgrafik.** Steams Bildpfade folgen nicht durchgängig dem Muster `.../<appid>/header.jpg`; neuere Titel haben einen Hash im Pfad. `games.json` kennt dafür jetzt ein Feld `picture`, dessen URL beim Download zuerst probiert wird.
+* **Neu: `scripts/steam_vr_debug.py`.** Zeigt die Zwischenschritte, die man sonst nicht sieht: welche `appinfo.vdf` gefunden wurde und in welcher Formatversion, welche VR-Felder und Kategorien Steam pro Spiel setzt, welches Signal gegriffen hat (`[VR ]` Steam, `[DAT]` Dateien, `[HAND]` von Hand) und wie groß der Cache ist. Reines Lesewerkzeug.
+* **Eine f-Zeichenkette ohne Platzhalter in `core/netbuffers.py`** entfernt — ruff lief deswegen rot.
+
+**Tests**
+
+* **Drei neue Testdateien mit zusammen 100 Prüfungen** (`test_steam_appinfo.py`, `test_games_scan.py`, `test_games_tab.py`); gesamt 617 statt 486. Der Smoke-Test steht bei 35 statt 24 Prüfungen.
+* **Der Parser wird gegen selbst gebaute `appinfo.vdf`-Dateien geprüft** — in beiden Formatversionen UND in beiden Formen (mit dem Rahmen-Knoten `appinfo`, so wie Steam schreibt, und ohne). Der Rahmen ist die Stelle, an der die Erkennung beim Bau einmal komplett gescheitert ist: `common` eine Ebene zu hoch gesucht, jedes Spiel galt als „kein VR", und kein Fehler tauchte auf, weil eine leere Angabe ein gültiges Ergebnis ist. Ein selbst gebauter Prüfling ist nur so gut wie das Verständnis des Formats.
+* **Festgenagelt sind unter anderem:** das Überspringen nicht gesuchter Apps landet auf dem richtigen Byte (ein Fehler dabei liefert nicht nichts, sondern zufällig aussehende Treffer), Kategorie 53/54/31 zählt und 52 nicht, die Dateierkennung ergänzt wirklich was Steam verschweigt, der teure Durchlauf läuft beim zweiten Scan gar nicht mehr, ein entferntes Spiel bleibt nach dem Scan weg, der stille Scan lässt ein offenes Panel stehen, und der Scan-Knopf scannt nicht still.
+
+#### 🇬🇧 English
+
+**The Games tab has been reworked: detection, auto-scan, local games.**
+
+* **VR games are now detected the way Steam itself does it.** It used to guess: for every installed game it walked the install folder looking for `openvr_api.dll` or an `openxr_loader`. That was slow (double-digit seconds on large libraries) and inaccurate both ways.
+* **New data source: `appcache/appinfo.vdf` (new module `core/steam_appinfo.py`).** Steam's own PICS cache — exactly what backs the VR filter in your Steam library. It sits on your disk: no network, no Steam login, no API key. Both format versions (v40 with string keys, v41 with a string table) are supported; apps you didn't ask for are skipped in the stream rather than decoded, which keeps the call fast even on a large file.
+* **Three OR-linked signals from the same file:** the `*vrsupport` fields (`openvrsupport`, `onlyvrsupport`, `openxrsupport`, `othervrsupport*`), Valve's categories 31/53/54 (VR Support / VR Supported / VR Only) and `playareavr`. No single signal covers everything — the fields have grown organically and are often unset on titles that added VR later, while the category follows what the developer declares in the store.
+* **Category 52 (Tracked Controller Support) deliberately does NOT count.** It only means a game can handle VR controllers, which on its own says nothing about whether it runs in VR.
+* **The "VR" user tag (tagid 21978) is NOT used either.** Players assign it, and it sits on OBS Studio, VoiceAttack, BeamNG.drive and several visual novels. As a signal it would be useless.
+* **Tools, DLC and soundtracks are filtered via `common/type`** instead of being guessed from the name. Steam writes the type itself.
+* **The old file detection stays as a second source** — for anything Steam doesn't tag. The list can therefore never be shorter than before.
+* **To keep that affordable, every result is cached** (key: app ID + the install folder's modification time). The expensive walk runs once per game; after that the scan is instant. When Steam updates a game the timestamp changes and it is re-checked — a title that adds VR support shows up on its own. A cache version invalidates old results when detection changes.
+* **What Steam already answered isn't walked again.** The expensive branch only runs for games Steam's data is silent about.
+
+**Auto-scan**
+
+* **The tab scans on open.** Many people simply missed the "Scan games" button and were left with an incomplete list — the most common reason for "it doesn't find my games". The cache is shown first, then a background refresh. On by default, switchable under Settings → General → Games.
+* **Tiles are only rebuilt when something actually changed.** Otherwise an expanded game would collapse on every tab switch. Comparison runs over a signature of app IDs and names, so a renamed game still updates its tile.
+* **The scan button stays usable meanwhile.** A scan the user didn't ask for must not lock their UI.
+
+**"+ Add Game"**
+
+* **New button with a two-column dialog (`core/games_add_dialog.py`).** The release valve next to detection: detection stays strict, and anything Steam doesn't tag (or tags wrongly) you add yourself.
+* **Option 1 — Steam game:** a searchable picker over ALL installed Steam games, regardless of VR tagging. It matches substrings rather than prefixes ("saber" finds "Beat Saber"). Already-added games stay visible and get marked. A manual entry survives every rescan and is undoable from a button in the detail panel.
+* **Option 2 — Local game:** name, executable path with "Browse...", and optional launch options. Supports native binaries, Unity builds (`.x86_64`/`.x86`), AppImages, shell scripts (`.sh`) and Windows programs (`.exe`) via Wine.
+* **Local games get their own section and a slimmer panel.** Without an app ID there is no CompatToolMapping, no Proton picker and no Steam launch options — showing those controls would be a promise this kind of entry cannot keep.
+* **Windows programs run through Wine, not Proton.** Proton needs a Steam-managed prefix and an app ID. If Wine is missing, the app says so instead of quietly doing nothing.
+* **The working directory is set to the executable's folder.** Unity and Godot builds look for their data folders relative to it and otherwise start with a black screen.
+* **A missing executable is reported in the panel**, not first when launching fails. After moving a games folder that is the normal case.
+* **Local game tiles don't trigger a cover download** — otherwise every entry would fire a request at Steam's image server with `local:3` as the app ID.
+
+**Removing games from the list**
+
+* **New: "Remove" in the expanded panel**, right next to "Restore config". Takes a game out of the VR list for good — detection is occasionally wrong.
+* **The confirmation says what does NOT happen:** the game stays installed, only the entry disappears. A button labelled "Remove" next to a game tile otherwise reads easily as "uninstall".
+* **Two ways back:** re-add the game via "+ Add Game", or **Settings → General → Games → "Reset games tab"**.
+* **Adding by hand undoes a removal and vice versa.** Otherwise two contradictory wishes would sit in the config, and which one wins would be a matter of evaluation order rather than the user's decision.
+
+**Smaller things**
+
+* **New Discord server:** `https://discord.gg/ShNKvvZu74` (maintained in `core/main.py`, line 50).
+* **Thief VR: Legacy of Shadow has tile artwork again.** Steam's image paths don't consistently follow `.../<appid>/header.jpg`; newer titles have a hash in the path. `games.json` now has a `picture` field whose URL is tried first during download.
+* **New: `scripts/steam_vr_debug.py`.** Shows the intermediate steps you otherwise can't see: which `appinfo.vdf` was found and in which format version, which VR fields and categories Steam sets per game, which signal fired (`[VR ]` Steam, `[DAT]` files, `[HAND]` added by you) and how large the cache is. Read-only tool.
+* **Removed an f-string without placeholders in `core/netbuffers.py`** — ruff was failing on it.
+
+**Tests**
+
+* **Three new test files with 100 checks between them** (`test_steam_appinfo.py`, `test_games_scan.py`, `test_games_tab.py`); 617 in total, up from 486. The smoke test is at 35 checks instead of 24.
+* **The parser is checked against hand-built `appinfo.vdf` files** — in both format versions AND both shapes (with the `appinfo` wrapper node, as Steam writes it, and without). That wrapper is where detection failed completely during development: `common` was looked for one level too high, every game counted as "not VR", and no error surfaced because an empty value is a valid result. A hand-built fixture is only as good as your understanding of the format.
+* **Pinned down among others:** skipping unwanted apps lands on the right byte (getting that wrong yields random-looking hits, not nothing), categories 53/54/31 count and 52 does not, file detection really does add what Steam omits, the expensive walk doesn't run at all on a second scan, a removed game stays gone after a scan, a quiet scan leaves an expanded panel alone, and the scan button doesn't scan quietly.
+
+### 🚀 v1.2.8
+
+#### 🇩🇪 Deutsch
 
 * **Neu: „adb reparieren" (`core/adb_doctor.py`).** Nach einem Systemupdate von `android-tools` findet adb die Brille oft nicht mehr, obwohl sich am Kabel nichts geändert hat. Dahinter stecken vier verschiedene Ursachen, die für den Nutzer identisch aussehen — die App unterscheidet sie jetzt und sagt, welcher Handgriff dran ist.
 * **Ursache 1, Versionskonflikt:** das Update hat `/usr/bin/adb` ersetzt, der laufende adb-Server ist aber noch der alte. Normalerweise heilt das von selbst; nicht aber, wenn ein anderes Programm (SideQuest, Android Studio) den Server festhält oder er unter einem anderen Benutzer läuft. Der Knopf macht `kill-server` + `start-server`.

@@ -529,6 +529,13 @@ class Ui_MainWindow:
         self.lbl_games_hint.setText(tr("games_click_hint"))
         self.lbl_games_tested_header.setText(tr("games_section_tested"))
         self.lbl_games_untested_header.setText(tr("games_section_untested"))
+        self.lbl_games_local_header.setText(tr("games_section_local"))
+        self.btn_games_add.setText(tr("games_add_btn"))
+        self.btn_games_add.setToolTip(tr("games_add_tip"))
+        self.chk_games_autoscan.setText(tr("games_autoscan_label"))
+        self.chk_games_autoscan.setToolTip(tr("games_autoscan_tip"))
+        self.btn_games_reset.setText(tr("games_reset_btn"))
+        self.btn_games_reset.setToolTip(tr("games_reset_tip"))
         self.btn_games_scan.setText(tr("games_scan_btn"))
         self.btn_games_info.setToolTip(tr("games_info_tooltip"))
         self.btn_games_db_update.setText(tr("games_db_update_btn"))
@@ -1201,6 +1208,20 @@ class Ui_MainWindow:
         """)
         head_row.addWidget(self.btn_games_db_update)
 
+        # "+ Spiel hinzufügen": das Ventil neben der automatischen Erkennung.
+        # Die richtet sich nach Steams VR-Kennzeichnung und ist bewusst
+        # streng — was dort fehlt (Beta-Zweige, nachgerüsteter VR-Modus,
+        # alles außerhalb von Steam), trägt der Nutzer hier selbst ein.
+        self.btn_games_add = QPushButton(tr("games_add_btn"))
+        self.btn_games_add.setCursor(Qt.PointingHandCursor)
+        self.btn_games_add.setToolTip(tr("games_add_tip"))
+        self.btn_games_add.setStyleSheet("""
+            QPushButton { background-color: #2e3440; color: #d8dee9; border: 1px solid #4c566a;
+                          font-weight: bold; padding: 8px 14px; border-radius: 6px; font-size: 12px; }
+            QPushButton:hover { background-color: #3b4252; border-color: #88c0d0; color: #eceff4; }
+        """)
+        head_row.addWidget(self.btn_games_add)
+
         self.btn_games_scan = QPushButton(tr("games_scan_btn"))
         self.btn_games_scan.setCursor(Qt.PointingHandCursor)
         self.btn_games_scan.setStyleSheet("""
@@ -1271,6 +1292,23 @@ class Ui_MainWindow:
         self.games_grid_untested.setSpacing(12)
         self.games_grid_untested.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         layout.addLayout(self.games_grid_untested)
+
+        # --- Sektion 3: eigene Spiele (alles, was nicht über Steam läuft) ---
+        # Eigener Abschnitt statt Einsortieren in "Ungetestet": diese Einträge
+        # haben keine AppID, kein Proton und keine Steam-Startparameter. Sie
+        # in dieselbe Sektion zu mischen hieße, überall Sonderfälle in der
+        # Anzeige zu haben — und der Nutzer sähe nicht, warum ein Spiel kein
+        # Proton-Panel hat.
+        self.lbl_games_local_header = QLabel(tr("games_section_local"))
+        self.lbl_games_local_header.setStyleSheet(
+            "color: #88c0d0; font-size: 13px; font-weight: bold; margin-top: 10px;")
+        self.lbl_games_local_header.setVisible(False)
+        layout.addWidget(self.lbl_games_local_header)
+
+        self.games_grid_local = QGridLayout()
+        self.games_grid_local.setSpacing(12)
+        self.games_grid_local.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        layout.addLayout(self.games_grid_local)
 
         # HINWEIS: Das Detail-Panel ist KEIN globales Element mehr — main.py
         # setzt es inline direkt unter die Reihe der angeklickten Kachel
@@ -1531,6 +1569,30 @@ class Ui_MainWindow:
         cv.addLayout(head)
         cv.addWidget(AdvancedBox("backup_create"))
         cv.addWidget(AdvancedBox("backup_restore"))
+        gen_v.addWidget(card)
+
+        # -- Spiele --
+        # Der Auto-Scan ist der einzige Schalter, der hier hingehört: er
+        # entscheidet, ob der Games-Tab beim Öffnen von selbst nachsieht.
+        # Standard AN — genau weil so viele Nutzer den Scan-Knopf übersehen
+        # haben und vor einer leeren Liste standen.
+        card, cv = self._settings_card()
+        head, _, _ = self._settings_header("games_group", lambda: tr("games_group_desc"))
+        # Holt Spiele zurueck, die im Games-Tab ueber "Entfernen" aus der
+        # Liste genommen wurden. Steht hier und nicht im Tab selbst: dort
+        # waere es ein Knopf, der fast nie gebraucht wird, aber dauerhaft
+        # Platz neben den haeufigen Aktionen belegt.
+        self.btn_games_reset = QPushButton(tr("games_reset_btn"))
+        self.btn_games_reset.setCursor(Qt.PointingHandCursor)
+        self.btn_games_reset.setToolTip(tr("games_reset_tip"))
+        self.btn_games_reset.setStyleSheet(self._CSS_SECONDARY)
+        head.addWidget(self.btn_games_reset)
+        cv.addLayout(head)
+        self.chk_games_autoscan = QCheckBox(tr("games_autoscan_label"))
+        self.chk_games_autoscan.setCursor(Qt.PointingHandCursor)
+        self.chk_games_autoscan.setToolTip(tr("games_autoscan_tip"))
+        self.chk_games_autoscan.setStyleSheet("color:#d8dee9; font-size:12px;")
+        cv.addWidget(self.chk_games_autoscan)
         gen_v.addWidget(card)
 
         gen_v.addStretch()

@@ -17,6 +17,7 @@ Die Attribute (self._games_scan_worker, self._selected_proton, ...) werden
 weiterhin in VRApp.__init__ gesetzt. Das ist bei Mixins ueblich, aber man
 muss es wissen: wer hier ein neues Attribut braucht, legt es dort an.
 """
+import os
 import subprocess
 
 from PySide6.QtWidgets import (QApplication, QLabel, QMessageBox, QHBoxLayout,
@@ -179,37 +180,110 @@ class GamesTabMixin:
 
     def on_games_tab_opened(self):
         """
-        Beim ersten Klick auf den Tab: gecachte Spiele aus der Config laden.
-        Wurde noch NIE gescannt (kein Cache-Key vorhanden) -> automatisch
-        scannen. Danach lädt der Tab nur noch aus dem Cache; neu gescannt
-        wird nur über den "Spiele scannen"-Button.
+        Jeder Klick auf den Tab: erst den Cache zeigen, dann im Hintergrund
+        nachsehen.
+
+        Bis v1.2.8 passierte hier nur beim ALLERERSTEN Besuch etwas; danach
+        musste man den "Spiele scannen"-Knopf treffen. Den haben viele
+        schlicht übersehen und standen vor einer unvollständigen oder leeren
+        Liste — der häufigste Grund für "erkennt meine Spiele nicht".
+
+        Jetzt gilt:
+          1. Gecachte Spiele sofort anzeigen (kein Warten, kein Flackern).
+          2. Wenn der Auto-Scan an ist (Standard), im Hintergrund neu scannen.
+             Das kostet nur Millisekunden, weil der Scanner Steams eigene
+             Kennzeichnung liest statt Verzeichnisse zu durchsuchen.
+          3. Die Kacheln werden NUR neu gebaut, wenn sich wirklich etwas
+             geändert hat — sonst würde ein aufgeklapptes Spiel bei jedem
+             Tab-Wechsel zuklappen.
+
+        Abschaltbar unter Einstellungen -> Allgemein -> Spiele.
         """
-        if self._games_tab_visited:
-            return
+        first_visit = not self._games_tab_visited
         self._games_tab_visited = True
 
         tested, untested, was_scanned = games_db.load_cached_games()
-        if was_scanned:
+        if was_scanned and first_visit:
             self.render_games_cards(tested, untested)
-        else:
-            self.start_games_scan()
 
-    def start_games_scan(self):
-        """Startet den Steam-Scan im Hintergrund (Button oder Erst-Besuch)."""
+        if not was_scanned:
+            self.start_games_scan()          # noch nie gescannt: immer
+        elif games_db.auto_scan_enabled():
+            self.start_games_scan(quiet=True)
+
+    def start_games_scan(self, quiet=False):
+        """
+        Startet den Steam-Scan im Hintergrund.
+
+        ``quiet=True`` ist der Auto-Scan beim Öffnen des Tabs: die Statuszeile
+        bleibt zurückhaltend und die Kacheln werden nur bei einer echten
+        Änderung neu gebaut. Der Knopf bleibt dabei bedienbar — ein Scan, den
+        der Nutzer gar nicht angestoßen hat, darf ihm nicht die Oberfläche
+        sperren.
+        """
         if self._games_scan_worker and self._games_scan_worker.isRunning():
             return
-        self.ui.btn_games_scan.setEnabled(False)
-        self.ui.lbl_games_status.setText(tr("games_scanning"))
+        self._games_scan_quiet = bool(quiet)
+        if not quiet:
+            self.ui.btn_games_scan.setEnabled(False)
+            self.ui.lbl_games_status.setText(tr("games_scanning"))
         self._games_scan_worker = GameScanWorker()
         self._games_scan_worker.result_signal.connect(self._on_games_scan_done)
         self._games_scan_worker.start()
+
+    @staticmethod
+    def _games_signature(tested, untested, local):
+        """Vergleichsschlüssel eines Scan-Ergebnisses.
+
+        Damit lässt sich "hat sich etwas geändert?" beantworten, ohne die
+        Kacheln zu vergleichen. Enthält bewusst auch die NAMEN: benennt Steam
+        ein Spiel um, soll die Kachel das mitbekommen.
+        """
+        return (
+            tuple(sorted(str(a) for a in tested)),
+            tuple(sorted((g["appid"], g["name"]) for g in untested)),
+            tuple(sorted((g["id"], g["name"]) for g in local)),
+        )
 
     def _on_games_scan_done(self, result):
         """Scan fertig: Ergebnis fest in die Config schreiben + anzeigen."""
         tested, untested = result
         games_db.save_cached_games(tested, untested)
         self.ui.btn_games_scan.setEnabled(True)
+
+        quiet = getattr(self, "_games_scan_quiet", False)
+        self._games_scan_quiet = False
+        signature = self._games_signature(tested, untested,
+                                          games_db.load_local_games())
+        if quiet and signature == getattr(self, "_rendered_games_key", None):
+            return          # nichts Neues -> offenes Panel nicht zerstören
         self.render_games_cards(tested, untested)
+
+    def refresh_games_cards(self):
+        """Kacheln aus dem Cache neu aufbauen (nach dem Hinzufügen/Entfernen
+        eines Eintrags). Ohne Scan — die Änderung kommt ja von uns selbst."""
+        tested, untested, _was = games_db.load_cached_games()
+        self.render_games_cards(tested, untested)
+
+    # ------------------------------------------------------------------ #
+    #  "+ Spiel hinzufügen"
+    # ------------------------------------------------------------------ #
+    def open_add_game_dialog(self):
+        """Öffnet den zweispaltigen Dialog (Steam-Spiel / eigenes Spiel).
+
+        Ein von Hand ergänztes STEAM-Spiel muss anschließend einmal durch den
+        Scan: erst der liest Name und Installationsort aus der Bibliothek und
+        schreibt beides in den Cache, aus dem die Kacheln entstehen. Ein
+        eigenes Spiel steht dagegen vollständig in der Config — dort genügt
+        ein Neuaufbau.
+        """
+        from games_add_dialog import AddGameDialog
+
+        dialog = AddGameDialog(self)
+        dialog.game_added.connect(self.refresh_games_cards)
+        dialog.exec()
+        if dialog.changed:
+            self.start_games_scan()
 
     # --- Kachel-Grid + Akkordeon -------------------------------------- #
     GAMES_TILES_PER_ROW = 4          # Kacheln pro Zeile
@@ -287,9 +361,11 @@ class GamesTabMixin:
 
         self._clear_layout(self.ui.games_grid_tested)
         self._clear_layout(self.ui.games_grid_untested)
+        self._clear_layout(self.ui.games_grid_local)
         self._games_tiles = {}
         self._games_tile_pos = {}
         self._games_untested_names = {}
+        self._games_local_entries = {}
         self._games_detail_widget = None
         self._detail_params_edit = None
         self._detail_status_lbl = None
@@ -299,10 +375,16 @@ class GamesTabMixin:
         self._expanded_appid = None
         self._selected_proton = games_db.load_selected_protons()
 
-        total = len(tested) + len(untested)
+        local = games_db.load_local_games()
+        # Was gerade auf dem Schirm steht — daran erkennt der Auto-Scan, ob
+        # ein Neuaufbau überhaupt nötig ist.
+        self._rendered_games_key = self._games_signature(tested, untested, local)
+
+        total = len(tested) + len(untested) + len(local)
         if total == 0:
             self.ui.lbl_games_tested_header.setVisible(False)
             self.ui.lbl_games_untested_header.setVisible(False)
+            self.ui.lbl_games_local_header.setVisible(False)
             self.ui.lbl_games_status.setText(tr("games_none"))
             return
         self.ui.lbl_games_status.setText(tr("games_found").format(n=total))
@@ -332,6 +414,17 @@ class GamesTabMixin:
             row, col = divmod(idx, self.GAMES_TILES_PER_ROW)
             self._games_tile_pos[appid] = (self.ui.games_grid_untested, row, col)
             self.ui.games_grid_untested.addWidget(tile, row * 2, col)
+
+        # Sektion 3: eigene Spiele (ohne Steam, ohne AppID)
+        self.ui.lbl_games_local_header.setVisible(bool(local))
+        for idx, entry in enumerate(local):
+            gid, name = entry["id"], entry["name"]
+            self._games_local_entries[gid] = entry
+            tile = self._build_game_tile(gid, name)
+            self._games_tiles[gid] = tile
+            row, col = divmod(idx, self.GAMES_TILES_PER_ROW)
+            self._games_tile_pos[gid] = (self.ui.games_grid_local, row, col)
+            self.ui.games_grid_local.addWidget(tile, row * 2, col)
 
         # Fehlende Cover jetzt im Hintergrund vom Steam-CDN holen
         self._start_cover_downloads()
@@ -428,7 +521,11 @@ class GamesTabMixin:
             lbl_cover.setStyleSheet(
                 "font-size: 48px; background-color: #2e3440; border-radius: 6px; border: none;")
             lbl_cover.setFixedSize(self.GAMES_COVER_W, self.GAMES_COVER_H)
-            self._pending_covers[str(appid)] = lbl_cover
+            # Nur fuer echte Steam-Spiele nachladen. Eigene Eintraege haben
+            # keine AppID — ein Download-Versuch koennte dort nur scheitern
+            # und wuerde den Worker mit sinnlosen Anfragen belasten.
+            if games_db.steam_appinfo.is_steam_appid(appid):
+                self._pending_covers[str(appid)] = lbl_cover
         box.addWidget(lbl_cover, alignment=Qt.AlignHCenter)
 
         # Fußzeile der Kachel: [▶ Starten]  ...  [▾ aufklappen]
@@ -477,6 +574,10 @@ class GamesTabMixin:
 
     def _tile_play_tooltip(self, appid, name):
         """Tooltip des ▶-Knopfs: zeigt, mit welcher Proton-Version gestartet wird."""
+        if games_db.is_local_id(appid):
+            # Eigene Spiele laufen ohne Proton — eine Versionsangabe waere
+            # hier schlicht gelogen.
+            return tr("games_local_play_tip").format(name=name)
         version = self._selected_proton.get(appid)
         if version:
             return tr("games_tile_play_tip").format(name=name, proton=version)
@@ -489,7 +590,16 @@ class GamesTabMixin:
           * ungetestet -> synthetischer Eintrag mit automatisch generierten
                           Proton-Empfehlungen und LEEREN Startparametern
                           (der Nutzer kann eigene eintragen).
+          * eigenes    -> Eintrag aus der Config, ohne Proton und ohne
+                          Steam-Startparameter (kein Steam im Spiel).
         """
+        if games_db.is_local_id(appid):
+            entry = self._games_local_entries.get(appid) or games_db.local_game(appid)
+            if entry is None:
+                return None
+            return {"name": entry["name"], "local": True, "entry": entry,
+                    "protons": [], "launch_params": {}, "fixes": []}
+
         game = games_db.GAMES.get(appid)
         if game:
             return game
@@ -541,7 +651,9 @@ class GamesTabMixin:
             if getattr(tile, "_arrow", None):
                 tile._arrow.setText("▴")
 
-        detail = self._build_game_detail(appid, game)
+        detail = (self._build_local_game_detail(appid, game["entry"])
+                  if game.get("local")
+                  else self._build_game_detail(appid, game))
         self._games_detail_widget = detail
         grid.addWidget(detail, row * 2 + 1, 0, 1, self.GAMES_TILES_PER_ROW)
 
@@ -700,6 +812,16 @@ class GamesTabMixin:
         game = self._game_data_for(appid)
         if not game:
             return
+
+        def status(text, color):
+            self.ui.lbl_games_status.setText(text)
+            self.ui.lbl_games_status.setStyleSheet(
+                f"color: {color}; font-size: 12px; font-weight: bold;")
+
+        if game.get("local"):
+            self._launch_local_game(game["entry"], status)
+            return
+
         # Ist das Spiel gerade offen, gelten die (evtl. ungespeicherten)
         # Panel-Werte — sonst die gespeicherten.
         if appid == self._expanded_appid and self._detail_params_edit is not None:
@@ -707,12 +829,264 @@ class GamesTabMixin:
         else:
             params = self._saved_launch_options(appid, game)
 
-        def status(text, color):
-            self.ui.lbl_games_status.setText(text)
-            self.ui.lbl_games_status.setStyleSheet(
-                f"color: {color}; font-size: 12px; font-weight: bold;")
-
         self._launch_game(appid, game, params, status)
+
+    # ------------------------------------------------------------------ #
+    #  Eigene Spiele (ohne Steam)
+    # ------------------------------------------------------------------ #
+    def _launch_local_game(self, entry, status):
+        """
+        Startet ein eigenes Spiel als eigenständigen Prozess.
+
+        Das Arbeitsverzeichnis wird bewusst auf den Ordner der Programmdatei
+        gesetzt: Unity- und Godot-Builds suchen ihre Datenordner relativ zum
+        Arbeitsverzeichnis und starten sonst mit schwarzem Bild oder gar
+        nicht — ein Fehler, den der Nutzer niemals bei uns suchen würde.
+        """
+        cmd, err = games_db.local_launch_cmd(entry)
+        if cmd is None:
+            status(tr(f"games_local_err_{err}"), "#bf616a")
+            return
+        try:
+            subprocess.Popen(cmd, cwd=os.path.dirname(entry["exe"]) or None)
+        except Exception as exc:
+            log.warning("[Games] Eigenes Spiel konnte nicht gestartet werden: %s", exc)
+            status(tr("games_local_err_launch").format(err=exc), "#bf616a")
+            return
+        status(tr("games_local_started").format(name=entry["name"]), "#a3be8c")
+
+    def _save_local_field(self, gid, field, value):
+        """Ein Feld eines eigenen Spiels sofort merken (Tippen im Panel)."""
+        games_db.update_local_game(gid, **{field: value})
+        entry = games_db.local_game(gid)
+        if entry is not None:
+            self._games_local_entries[gid] = entry
+
+    def _browse_local_exe(self, gid, line_edit):
+        from PySide6.QtWidgets import QFileDialog
+        start = os.path.dirname(line_edit.text().strip()) or os.path.expanduser("~")
+        path, _f = QFileDialog.getOpenFileName(
+            self, tr("games_add_file_dialog_title"), start,
+            f"{tr('games_add_filter_games')} "
+            "(*.exe *.sh *.AppImage *.appimage *.x86_64 *.x86 *.bin *.run);;"
+            f"{tr('games_add_filter_all')} (*)")
+        if path:
+            line_edit.setText(path)
+            self._save_local_field(gid, "exe", path)
+            self._detail_status(tr("games_local_saved"), "#a3be8c")
+
+    def remove_local_game(self, gid):
+        """'Entfernen' im Panel eines eigenen Spiels — mit Rückfrage.
+
+        Gelöscht wird nur der EINTRAG, nie die Datei auf der Platte. Das steht
+        auch so im Rückfragetext: ein Löschdialog, bei dem man raten muss, was
+        gleich verschwindet, ist keiner.
+        """
+        entry = games_db.local_game(gid)
+        if entry is None:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("games_local_remove_title"))
+        box.setIcon(QMessageBox.Question)
+        box.setText(tr("games_local_remove_text").format(name=entry["name"]))
+        btn_go = box.addButton(tr("games_local_remove_btn"), QMessageBox.DestructiveRole)
+        box.addButton(tr("cancel"), QMessageBox.RejectRole)
+        self._widen_dialog_buttons(box)
+        box.exec()
+        if box.clickedButton() is not btn_go:
+            return
+        games_db.remove_local_game(gid)
+        self._collapse_detail()
+        self.refresh_games_cards()
+
+    def remove_manual_steam_game(self, appid):
+        """Nimmt einen von Hand ergänzten Steam-Eintrag zurück.
+
+        Das Spiel kann danach trotzdem in der Liste bleiben — nämlich dann,
+        wenn Steam es ohnehin als VR führt. Deshalb wird anschließend neu
+        gescannt und nicht einfach die Kachel entfernt: die Anzeige soll den
+        echten Zustand zeigen, nicht den erwarteten.
+        """
+        games_db.remove_manual_steam_appid(appid)
+        self._collapse_detail()
+        self.start_games_scan()
+
+    def remove_game_from_list(self, appid):
+        """'Entfernen' im Panel: nimmt ein Steam-Spiel dauerhaft aus der Liste.
+
+        Mit Rückfrage, und die sagt deutlich, was NICHT passiert: das Spiel
+        bleibt installiert, nur der Eintrag verschwindet. Ein Knopf mit der
+        Aufschrift "Entfernen" neben einer Spielekachel kann sonst leicht als
+        "deinstallieren" gelesen werden — und das wäre ein Schreckmoment, den
+        niemand braucht.
+        """
+        game = self._game_data_for(appid)
+        if not game:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("games_remove_title"))
+        box.setIcon(QMessageBox.Question)
+        box.setText(tr("games_remove_text").format(name=game.get("name", appid)))
+        btn_go = box.addButton(tr("games_remove_btn"), QMessageBox.DestructiveRole)
+        box.addButton(tr("cancel"), QMessageBox.RejectRole)
+        self._widen_dialog_buttons(box)
+        box.exec()
+        if box.clickedButton() is not btn_go:
+            return
+
+        games_db.hide_game(appid)
+        self._collapse_detail()
+        # Aus dem Cache neu aufbauen statt zu scannen: das Spiel ist ja noch
+        # installiert, ein Scan würde es nur erneut finden und wieder
+        # herausfiltern — dieselbe Liste, nur langsamer.
+        tested, untested, _was = games_db.load_cached_games()
+        tested = [a for a in tested if a != appid]
+        untested = [g for g in untested if g["appid"] != appid]
+        games_db.save_cached_games(tested, untested)
+        self.render_games_cards(tested, untested)
+
+    def reset_games_list(self):
+        """Einstellungen -> Spiele -> 'Games-Tab zurücksetzen'.
+
+        Holt alle entfernten Spiele zurück. Danach wird neu gescannt, damit
+        die Liste wieder dem entspricht, was wirklich installiert ist — und
+        nicht dem Stand, der beim Entfernen zufällig im Cache lag.
+        """
+        count = len(games_db.load_hidden_games())
+        if not count:
+            QMessageBox.information(self, tr("games_reset_title"),
+                                    tr("games_reset_nothing"))
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("games_reset_title"))
+        box.setIcon(QMessageBox.Question)
+        box.setText(tr("games_reset_text").format(n=count))
+        btn_go = box.addButton(tr("games_reset_btn"), QMessageBox.AcceptRole)
+        box.addButton(tr("cancel"), QMessageBox.RejectRole)
+        self._widen_dialog_buttons(box)
+        box.exec()
+        if box.clickedButton() is not btn_go:
+            return
+
+        restored = games_db.clear_hidden_games()
+        self._collapse_detail()
+        self.start_games_scan()
+        QMessageBox.information(self, tr("games_reset_title"),
+                                tr("games_reset_done").format(n=restored))
+
+    def _build_local_game_detail(self, gid, entry):
+        """
+        Detail-Panel eines eigenen Spiels.
+
+        Bewusst viel schlanker als das Steam-Panel: ohne AppID gibt es kein
+        CompatToolMapping, keine Proton-Auswahl und keine Steam-Startparameter.
+        Alles, was hier nicht steht, könnte für diesen Eintrag auch gar nichts
+        bewirken — es anzuzeigen wäre eine Zusage, die wir nicht halten.
+        """
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card.setStyleSheet("""
+            QFrame#settingsCard {
+                background-color: #21252b;
+                border: 1px solid #88c0d0;
+                border-radius: 6px;
+            }
+        """)
+        box = QVBoxLayout(card)
+        box.setContentsMargins(14, 12, 14, 12)
+        box.setSpacing(8)
+
+        name_row = QHBoxLayout()
+        lbl_name = QLabel(entry["name"])
+        lbl_name.setStyleSheet(
+            "font-weight: bold; color: #eceff4; font-size: 15px; border: none;")
+        name_row.addWidget(lbl_name)
+
+        lbl_badge = QLabel(tr("games_local_badge"))
+        lbl_badge.setStyleSheet("color: #88c0d0; font-size: 11px; border: none;")
+        name_row.addWidget(lbl_badge)
+
+        btn_play = QPushButton(tr("games_play_btn"))
+        btn_play.setObjectName("panelPlay")
+        btn_play.setCursor(Qt.PointingHandCursor)
+        btn_play.setIcon(make_play_icon(12, "#21252b"))
+        btn_play.setIconSize(QSize(12, 12))
+        btn_play.setStyleSheet("""
+            QPushButton#panelPlay { background-color: #a3be8c; color: #21252b; border: none;
+                          font-weight: bold; padding: 5px 16px; border-radius: 4px; font-size: 12px; }
+            QPushButton#panelPlay:hover { background-color: #b8d19f; }
+            QPushButton#panelPlay:pressed { background-color: #8fae76; }
+        """)
+        btn_play.clicked.connect(
+            lambda _=False, g=gid: self._launch_local_game(
+                self._games_local_entries.get(g) or games_db.local_game(g),
+                self._detail_status))
+        name_row.addWidget(btn_play)
+        name_row.addStretch()
+        box.addLayout(name_row)
+
+        # --- Programmdatei ---
+        lbl_exe = QLabel(tr("games_add_exe_label"))
+        lbl_exe.setStyleSheet("color: #7b88a1; font-size: 11px; font-weight: bold; border: none;")
+        box.addWidget(lbl_exe)
+
+        exe_row = QHBoxLayout()
+        txt_exe = QLineEdit(entry["exe"])
+        txt_exe.setStyleSheet("font-family: monospace; font-size: 11px;")
+        txt_exe.textEdited.connect(
+            lambda text, g=gid: self._save_local_field(g, "exe", text))
+        exe_row.addWidget(txt_exe)
+
+        btn_browse = QPushButton(tr("games_add_browse_btn"))
+        btn_browse.setCursor(Qt.PointingHandCursor)
+        btn_browse.setStyleSheet(self._fix_button_style())
+        btn_browse.clicked.connect(
+            lambda _=False, g=gid, t=txt_exe: self._browse_local_exe(g, t))
+        exe_row.addWidget(btn_browse)
+        box.addLayout(exe_row)
+
+        # Fehlt die Datei, sagen wir es JETZT — nicht erst, wenn der Start
+        # scheitert. Nach einem Spiele-Umzug ist das der Normalfall.
+        if not os.path.isfile(os.path.expanduser(entry["exe"])):
+            lbl_warn = QLabel(tr("games_local_err_not_found"))
+            lbl_warn.setStyleSheet("color: #ebcb8b; font-size: 11px; border: none;")
+            lbl_warn.setWordWrap(True)
+            box.addWidget(lbl_warn)
+
+        # --- Startparameter ---
+        lbl_opts = QLabel(tr("games_add_opts_label"))
+        lbl_opts.setStyleSheet("color: #7b88a1; font-size: 11px; font-weight: bold; border: none;")
+        box.addWidget(lbl_opts)
+
+        txt_opts = QLineEdit(entry.get("launch_options", ""))
+        txt_opts.setPlaceholderText(tr("games_add_opts_placeholder"))
+        txt_opts.setStyleSheet("font-family: monospace; font-size: 11px;")
+        txt_opts.textEdited.connect(
+            lambda text, g=gid: self._save_local_field(g, "launch_options", text))
+        box.addWidget(txt_opts)
+
+        # --- Entfernen ---
+        foot = QHBoxLayout()
+        btn_remove = QPushButton(tr("games_local_remove_btn"))
+        btn_remove.setCursor(Qt.PointingHandCursor)
+        btn_remove.setToolTip(tr("games_local_remove_tip"))
+        btn_remove.setStyleSheet("""
+            QPushButton { background-color: #bf616a; color: white; border: none;
+                          font-weight: bold; padding: 6px 12px; border-radius: 4px; font-size: 11px; }
+            QPushButton:hover { background-color: #d08770; }
+        """)
+        btn_remove.clicked.connect(lambda _=False, g=gid: self.remove_local_game(g))
+        foot.addWidget(btn_remove)
+        foot.addStretch()
+        box.addLayout(foot)
+
+        self._detail_status_lbl = QLabel("")
+        self._detail_status_lbl.setStyleSheet("color: #88c0d0; font-size: 11px; border: none;")
+        self._detail_status_lbl.setWordWrap(True)
+        box.addWidget(self._detail_status_lbl)
+
+        return card
 
     def _build_game_detail(self, appid, game):
         """
@@ -763,6 +1137,29 @@ class GamesTabMixin:
         """)
         btn_play.clicked.connect(lambda _, a=appid, g=game: self._play_game(a, g))
         name_row.addWidget(btn_play)
+
+        # Von Hand ergaenzt? Dann sichtbar machen UND zuruecknehmbar. Ohne
+        # diesen Knopf haette ein Fehlgriff im Dialog (falsches Spiel
+        # ausgewaehlt) keine Umkehrung ausser dem Bearbeiten der Config.
+        if str(appid) in games_db.load_manual_steam_appids():
+            lbl_manual = QLabel(tr("games_manual_badge"))
+            lbl_manual.setStyleSheet(
+                "color: #88c0d0; font-size: 11px; border: none;")
+            lbl_manual.setToolTip(tr("games_manual_badge_tip"))
+            name_row.addWidget(lbl_manual)
+
+            btn_unmanual = QPushButton(tr("games_manual_remove_btn"))
+            btn_unmanual.setCursor(Qt.PointingHandCursor)
+            btn_unmanual.setToolTip(tr("games_manual_remove_tip"))
+            btn_unmanual.setStyleSheet("""
+                QPushButton { background-color: #2e3440; color: #d8dee9; border: 1px solid #4c566a;
+                              padding: 3px 10px; border-radius: 4px; font-size: 11px; }
+                QPushButton:hover { background-color: #3b4252; border-color: #bf616a; }
+            """)
+            btn_unmanual.clicked.connect(
+                lambda _=False, a=appid: self.remove_manual_steam_game(a))
+            name_row.addWidget(btn_unmanual)
+
         name_row.addStretch()
         box.addLayout(name_row)
 
@@ -1060,6 +1457,20 @@ class GamesTabMixin:
             btn_rs.setEnabled(False)
             btn_rs.setToolTip(tr("restore_cfg_btn_none"))
         bk_row.addWidget(btn_rs)
+
+        # --- Aus der Liste entfernen -------------------------------------- #
+        # Steht bewusst NEBEN den Backup-Knoepfen und nicht bei den Fixes:
+        # es ist die einzige Aktion im Panel, die die Liste selbst aendert.
+        btn_del = QPushButton(tr("games_remove_btn"))
+        btn_del.setCursor(Qt.PointingHandCursor)
+        btn_del.setToolTip(tr("games_remove_tip"))
+        btn_del.setStyleSheet("""
+            QPushButton { background-color: #2e3440; color: #d8dee9; border: 1px solid #4c566a;
+                          padding: 6px 12px; border-radius: 4px; font-size: 11px; }
+            QPushButton:hover { background-color: #3b4252; border-color: #bf616a; color: #eceff4; }
+        """)
+        btn_del.clicked.connect(lambda _=False, a=appid: self.remove_game_from_list(a))
+        bk_row.addWidget(btn_del)
 
         bk_row.addStretch()
         box.addLayout(bk_row)

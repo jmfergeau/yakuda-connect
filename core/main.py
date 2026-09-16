@@ -42,10 +42,12 @@ import webbrowser
 # scripts/bump_version.py haelt sie automatisch mit core/version.py gleich,
 # und der Smoke-Test bricht ab, falls beide auseinanderlaufen oder das Muster
 # mehr als einmal vorkommt.
-APP_VERSION = "v1.2.8"
+APP_VERSION = "v1.2.9"
 
-# Community-Links (Settings -> "Community & Updates")
-DISCORD_URL = "https://discord.gg/X5TaN4A47h"
+# Community-Links (Settings -> "Community & Updates").
+# HIER werden Discord und Ko-fi gepflegt — es gibt keine zweite Stelle im
+# Programm, die sie kennt.
+DISCORD_URL = "https://discord.gg/ShNKvvZu74"
 KOFI_URL    = "https://ko-fi.com/yakuda_"
 
 # Ubuntu/Debian: WiVRn ist nicht in den Repos. Diese Befehle bauen es nativ —
@@ -287,7 +289,10 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         self._vrc_check_worker = None        # laufende VRChat-Videoplayer-Diagnose
         self._vci_worker = None              # laufende VRCVideoCacher-Installation
         self._games_tab_visited = False      # erster Klick auf den Tab -> Auto-Scan
+        self._games_scan_quiet = False       # laeuft gerade ein Auto-Scan im Hintergrund?
+        self._rendered_games_key = None      # was aktuell auf dem Schirm steht (Auto-Scan-Vergleich)
         self._games_untested_names = {}      # appid -> Anzeigename (ungetestete Spiele)
+        self._games_local_entries = {}       # local:<n> -> eigener Spieleintrag
         self._games_tile_pos = {}            # appid -> (grid, zeile, spalte) fürs Inline-Panel
         self._games_detail_widget = None     # aktuell ausgeklapptes Inline-Panel
         self._detail_params_edit = None      # Feld mit den FINALEN Parametern (für "Play")
@@ -990,8 +995,14 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         self.ui.sidebar.currentRowChanged.connect(self.on_tab_changed)
 
         # Games-Tab
-        self.ui.btn_games_scan.clicked.connect(self.start_games_scan)
+        # lambda statt direkt: clicked() liefert ein bool (checked) mit, das
+        # sonst als "quiet" ankaeme — der Knopf wuerde dann still scannen.
+        self.ui.btn_games_scan.clicked.connect(lambda: self.start_games_scan())
+        self.ui.btn_games_add.clicked.connect(self.open_add_game_dialog)
         self.ui.btn_games_info.clicked.connect(self.show_games_info)
+        self.ui.chk_games_autoscan.setChecked(games_db.auto_scan_enabled())
+        self.ui.chk_games_autoscan.toggled.connect(games_db.set_auto_scan)
+        self.ui.btn_games_reset.clicked.connect(self.reset_games_list)
         self.ui.btn_games_db_update.clicked.connect(self.start_games_db_update)
         self._refresh_games_db_version()
         # Im Hintergrund prüfen, ob eine neuere Spiele-DB (games.json) vorliegt.

@@ -1,6 +1,6 @@
 {
   "info": {
-    "version": "1.2.7",
+    "version": "1.2.8",
     "last_updated": "2026-09-12"
   },
   "picture_template": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/header.jpg",
@@ -114,7 +114,8 @@
         "cachyos": "CachyOSPro11",
         "default": "Pro11",
         "alternative": "Pro11GE"
-      }
+      },
+      "picture": "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/2800080/052ddf4a3541b04731fc88e5f675943685eeeb99/header.jpg"
     },
     "620980": {
       "name": "Beat Saber",

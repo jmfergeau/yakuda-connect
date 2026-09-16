@@ -185,6 +185,59 @@ def main():
     except Exception as exc:
         check("vrchat_check", False, f"{type(exc).__name__}: {exc}")
 
+    # --- Games-Tab: eigene Spiele, Auto-Scan, Hinzufuegen-Dialog ---
+    # Diese Wege entstehen wie die VRChat-Knoepfe erst zur Laufzeit. Faellt
+    # ein Locale-Schluessel weg oder benennt jemand eine Methode um, startet
+    # die App weiterhin sauber — und bricht erst beim Klick des Nutzers.
+    try:
+        import games as _games
+        from PySide6.QtWidgets import QPushButton
+        from translations import tr
+
+        marker = os.path.join(fake_home, "eigenes-spiel.sh")
+        with open(marker, "w") as fh:
+            fh.write("#!/bin/sh\nexit 0\n")
+        os.chmod(marker, 0o755)
+
+        ok_add, gid = _games.add_local_game("Smoke-Spiel", marker, "-vr")
+        check("Eigenes Spiel anlegen", ok_add, str(gid))
+
+        w.render_games_cards(["438100"], [{"appid": "1234", "name": "Testspiel"}])
+        check("Kachel fuer eigenes Spiel", gid in getattr(w, "_games_tiles", {}))
+        check("Kein Cover-Download fuer eigene Eintraege",
+              not any(str(k).startswith("local:") for k in w._pending_covers))
+
+        w._on_game_tile_clicked(gid)
+        panel = getattr(w, "_games_detail_widget", None)
+        btns = " ".join(b.text() for b in panel.findChildren(QPushButton)) if panel else ""
+        check("Panel: Entfernen-Knopf", tr("games_local_remove_btn") in btns, btns[:80])
+        check("Panel: kein Proton fuer eigene Spiele",
+              tr("games_use_btn") not in btns, btns[:80])
+        w._collapse_detail()
+        _games.remove_local_game(gid)
+
+        # Der stille Auto-Scan darf ein offenes Panel nicht zuklappen.
+        w.render_games_cards(["438100"], [])
+        w._on_game_tile_clicked("438100")
+        before = w._games_detail_widget
+        w._games_scan_quiet = True
+        w._on_games_scan_done((["438100"], []))
+        check("Auto-Scan laesst offenes Panel stehen",
+              w._games_detail_widget is before)
+        w._collapse_detail()
+
+        for meth in ("open_add_game_dialog", "refresh_games_cards",
+                     "remove_local_game", "remove_manual_steam_game"):
+            check(f"Handler {meth}", callable(getattr(w, meth, None)))
+
+        from games_add_dialog import AddGameDialog
+        dlg = AddGameDialog(w)
+        dlg._on_steam_games([{"appid": "1234", "name": "Testspiel"}])
+        check("Hinzufuegen-Dialog baut", dlg.combo_steam.count() == 1)
+        dlg.close()
+    except Exception as exc:
+        check("Games-Tab", False, f"{type(exc).__name__}: {exc}")
+
     try:
         w.check_tools_status()
         for key in list(w.ui.tool_cards)[:4]:

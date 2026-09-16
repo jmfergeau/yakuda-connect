@@ -35,10 +35,12 @@ import glob
 import os
 import re
 import json
+import shlex
 import shutil
 import subprocess
 
 import vr_environment as venv
+import steam_appinfo
 
 from logging_setup import get_logger
 from jsonio import update_json
@@ -715,7 +717,7 @@ def _parse_acf(path):
             "installdir": field("installdir")}
 
 
-def _looks_like_vr_game(steamapps_dir, installdir):
+def _looks_like_vr_game(steamapps_dir, installdir, quick=False):
     """
     True, wenn der Installationsordner OpenVR-/OpenXR-Loader enthält.
 
@@ -725,6 +727,12 @@ def _looks_like_vr_game(steamapps_dir, installdir):
          unter Engine/Binaries/ThirdParty/OpenXR/<platform>/ liegt.
       2. Fallback: begrenzter Walk. Uninteressante Riesenordner (Content, Saved,
          ...) werden übersprungen, damit das Budget für die Binaries reicht.
+
+    ``quick=True`` laesst Stufe 2 aus — fuer Faelle, in denen die Dauer
+    wichtiger ist als die Vollstaendigkeit. Im Scan selbst wird das nicht
+    mehr gebraucht (dort faengt der Ergebnis-Cache die Dauer ab), der
+    Schalter bleibt aber fuer Aufrufer, die schnell eine grobe Antwort
+    wollen.
     """
     if not installdir:
         return False
@@ -739,6 +747,9 @@ def _looks_like_vr_game(steamapps_dir, installdir):
                 return True
         except Exception as exc:
             log.debug("_looks_like_vr_game: ignoriert — %s", exc)
+
+    if quick:
+        return False
 
     # --- Stufe 2: begrenzter Walk als Fallback ---------------------------- #
     root_depth = root.rstrip(os.sep).count(os.sep)
@@ -762,18 +773,15 @@ def _looks_like_vr_game(steamapps_dir, installdir):
     return False
 
 
-def scan_installed_games():
+def installed_steam_apps():
     """
-    Scannt alle Steam-Bibliotheken nach appmanifest_<id>.acf und liest
-    JEDES gefundene VR-Spiel ein (kein Profil-Filter mehr!).
-    Rückgabe: (tested, untested)
-      tested   : AppIDs mit vordefiniertem Profil in GAMES (sortiert nach Name)
-      untested : Liste von {"appid", "name"} für alle übrigen erkannten
-                 VR-Spiele (Erkennung: OpenVR-/OpenXR-Loader im Spielordner),
-                 sortiert nach Name.
+    Alle installierten Steam-Apps aus den appmanifest_<id>.acf.
+
+    Rückgabe: Liste von {"appid", "name", "installdir", "steamapps"} —
+    ohne Proton-Versionen und Steam-Runtimes, aber sonst ungefiltert.
+    Doppelte AppIDs (dieselbe App in zwei Bibliotheken) erscheinen einmal.
     """
-    tested = set()
-    untested = {}
+    apps = {}
     for sa in _steamapps_dirs():
         try:
             fnames = os.listdir(sa)
@@ -786,18 +794,215 @@ def scan_installed_games():
             if not info or not info["appid"]:
                 continue
             appid = info["appid"]
+            if appid in apps:
+                continue
             if appid in _APPID_BLACKLIST or _is_steam_tool(info["name"]):
                 continue
-            if appid in GAMES:
-                tested.add(appid)          # kuratiertes Profil -> "getestet"
-            elif appid not in untested and _looks_like_vr_game(sa, info["installdir"]):
-                untested[appid] = info["name"] or f"App {appid}"
+            apps[appid] = {
+                "appid": appid,
+                "name": info["name"] or f"App {appid}",
+                "installdir": info["installdir"],
+                "steamapps": sa,
+            }
+    return list(apps.values())
+
+
+def scan_all_steam_games():
+    """
+    ALLE installierten Steam-Spiele — unabhängig davon, ob Steam sie als VR
+    kennzeichnet. Das ist die Auswahlliste im "Spiel hinzufügen"-Dialog:
+    findet der VR-Scan ein Spiel nicht, trägt der Nutzer es hier von Hand ein.
+
+    Rückgabe: [{"appid", "name"}, ...] nach Name sortiert.
+    """
+    apps = installed_steam_apps()
+    data, _ok = steam_appinfo.commons([a["appid"] for a in apps])
+    out = []
+    for app in apps:
+        common = data.get(app["appid"])
+        # Werkzeuge, DLC und Soundtracks gehören nicht in eine Spieleauswahl.
+        # Steam schreibt den Typ selbst hin, wir müssen ihn nicht raten.
+        if common is not None and not steam_appinfo.is_playable_type(common):
+            continue
+        out.append({"appid": app["appid"], "name": app["name"]})
+    out.sort(key=lambda g: g["name"].lower())
+    return out
+
+
+# --------------------------------------------------------------------------- #
+#  Ergebnis-Cache der Dateierkennung
+# --------------------------------------------------------------------------- #
+# Die Dateierkennung aus v1.2.8 ist gruendlich, aber teuer: pro Spiel ein
+# Verzeichnis-Durchlauf ueber bis zu 6000 Ordner. Genau deshalb konnte sie nie
+# automatisch beim Oeffnen des Tabs laufen.
+#
+# Sie muss aber laufen, denn Steams Kennzeichnung ist nicht lueckenlos —
+# Spiele mit nachtraeglich ergaenztem VR-Modus stehen dort oft gar nicht.
+# Ohne den Rueckfall waere die Liste kuerzer als in v1.2.8, und das ist aus
+# Sicht des Nutzers schlicht ein Rueckschritt.
+#
+# Der Ausweg ist der Cache hier: der teure Durchlauf passiert EINMAL pro
+# Spiel, das Ergebnis haelt, bis sich der Installationsordner aendert. Der
+# erste Scan nach dem Update dauert also wie frueher, jeder weitere ist
+# wieder sofort da.
+_VR_FILECHECK_VERSION = 2       # hochzaehlen, wenn sich die Erkennung aendert
+
+
+def _install_stamp(steamapps_dir, installdir):
+    """Kennung des Installationsordners — aendert sie sich, wird neu geprueft.
+
+    Genommen wird die Aenderungszeit des Ordners selbst. Die springt, wenn
+    Steam Dateien darin anlegt, loescht oder ersetzt, also bei jedem Update
+    und jeder Neuinstallation. Ein Durchlauf durch den ganzen Baum waere
+    genauer, koestete aber wieder genau das, was der Cache einsparen soll.
+    """
+    if not installdir:
+        return None
+    path = os.path.join(steamapps_dir, "common", installdir)
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return f"{st.st_mtime_ns}:{path}"
+
+
+def load_vr_filecheck_cache():
+    """Gemerkte Ergebnisse der Dateierkennung: {appid: {"stamp", "vr"}}."""
+    data = _load_app_config().get("games_vr_filecheck", {})
+    if not isinstance(data, dict):
+        return {}
+    # Aendert sich die Erkennung, ist jedes alte Ergebnis wertlos — dann
+    # lieber einmal neu pruefen als dauerhaft eine veraltete Antwort geben.
+    if data.get("version") != _VR_FILECHECK_VERSION:
+        return {}
+    apps = data.get("apps")
+    return apps if isinstance(apps, dict) else {}
+
+
+def save_vr_filecheck_cache(entries):
+    if not update_json(APP_CONFIG, {"games_vr_filecheck": {
+            "version": _VR_FILECHECK_VERSION, "apps": entries}}):
+        log.warning("Cache der Dateierkennung konnte nicht gespeichert werden.")
+
+
+def scan_installed_games():
+    """
+    Scannt alle Steam-Bibliotheken und liefert die VR-Spiele.
+
+    Zwei Quellen, ODER-verknüpft — die Liste kann dadurch nie kürzer sein
+    als in v1.2.8:
+
+      1. **Steams eigene Kennzeichnung** (steam_appinfo.py): die
+         ``*vrsupport``-Felder, Valves Kategorien 31/53/54 und
+         ``playareavr``. Kommt aus appcache/appinfo.vdf, kostet
+         Millisekunden, ist aber nicht lückenlos — Spiele mit nachträglich
+         ergänztem VR-Modus fehlen dort häufig.
+      2. **Die Dateierkennung aus v1.2.8**: OpenVR-/OpenXR-Loader im
+         Spielordner. Gründlich, aber teuer — deshalb wird jedes Ergebnis
+         gecacht und nur neu ermittelt, wenn sich der Installationsordner
+         geändert hat.
+
+    Rückgabe: (tested, untested)
+      tested   : AppIDs mit kuratiertem Profil in GAMES (nach Name sortiert)
+      untested : [{"appid", "name"}] aller übrigen VR-Spiele (nach Name)
+    """
+    apps = installed_steam_apps()
+    manual = set(load_manual_steam_appids())
+    tags, tags_ok = steam_appinfo.commons([a["appid"] for a in apps])
+    if not tags_ok:
+        log.info("Steams appinfo.vdf nicht verfügbar — nur Dateierkennung.")
+
+    cache = load_vr_filecheck_cache()
+    fresh = {}
+    tested, untested = set(), {}
+    by_source = {"manual": 0, "steam": 0, "files": 0}
+
+    hidden = set(load_hidden_games())
+    for app in apps:
+        appid, name = app["appid"], app["name"]
+        if appid in hidden:
+            continue                          # vom Nutzer entfernt
+        common = tags.get(appid)
+        source = ""
+
+        if appid in manual:
+            # Vom Nutzer selbst eingetragen: gilt immer, ohne weitere Prüfung.
+            source = "manual"
+        else:
+            if common is not None and not steam_appinfo.is_playable_type(common):
+                continue                      # Werkzeug/DLC/Soundtrack
+            if common and steam_appinfo.common_says_vr(common):
+                source = "steam"
+            else:
+                # Steam sagt nichts (oder nicht genug) -> nachsehen. Der
+                # Durchlauf ist der teure aus v1.2.8, aber nur beim ersten
+                # Mal je Spiel.
+                stamp = _install_stamp(app["steamapps"], app["installdir"])
+                hit = cache.get(appid)
+                if stamp and isinstance(hit, dict) and hit.get("stamp") == stamp:
+                    is_vr = bool(hit.get("vr"))
+                else:
+                    is_vr = _looks_like_vr_game(app["steamapps"], app["installdir"])
+                if stamp:
+                    fresh[appid] = {"stamp": stamp, "vr": is_vr}
+                if is_vr:
+                    source = "files"
+
+        if not source:
+            continue
+        by_source[source] += 1
+        if appid in GAMES:
+            tested.add(appid)                 # kuratiertes Profil -> "getestet"
+        else:
+            untested[appid] = name
+
+    if fresh:
+        save_vr_filecheck_cache(fresh)
+    log.info("VR-Scan: %d Spiele geprüft, erkannt über Steam: %d, über "
+             "Dateien: %d, von Hand: %d", len(apps), by_source["steam"],
+             by_source["files"], by_source["manual"])
 
     tested_list = sorted(tested, key=lambda a: GAMES[a]["name"].lower())
     untested_list = sorted(
         ({"appid": a, "name": n} for a, n in untested.items()),
         key=lambda g: g["name"].lower())
     return tested_list, untested_list
+
+
+def vr_sources(apps=None):
+    """
+    Welches Signal bei welchem Spiel angeschlagen hat — für das
+    Diagnose-Skript und für Fehlerberichte.
+
+    Rückgabe: {appid: "manual" | "steam" | "files" | ""}. Nutzt denselben
+    Cache wie der Scan, kostet also nach dem ersten Durchlauf nichts.
+    """
+    apps = apps if apps is not None else installed_steam_apps()
+    manual = set(load_manual_steam_appids())
+    tags, _ok = steam_appinfo.commons([a["appid"] for a in apps])
+    cache = load_vr_filecheck_cache()
+
+    out = {}
+    for app in apps:
+        appid = app["appid"]
+        common = tags.get(appid)
+        if appid in manual:
+            out[appid] = "manual"
+            continue
+        if common is not None and not steam_appinfo.is_playable_type(common):
+            out[appid] = ""
+            continue
+        if common and steam_appinfo.common_says_vr(common):
+            out[appid] = "steam"
+            continue
+        stamp = _install_stamp(app["steamapps"], app["installdir"])
+        hit = cache.get(appid)
+        if stamp and isinstance(hit, dict) and hit.get("stamp") == stamp:
+            is_vr = bool(hit.get("vr"))
+        else:
+            is_vr = _looks_like_vr_game(app["steamapps"], app["installdir"])
+        out[appid] = "files" if is_vr else ""
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -839,6 +1044,320 @@ def load_cached_games():
     tested_list = sorted(tested, key=lambda a: GAMES[a]["name"].lower())
     untested.sort(key=lambda g: g["name"].lower())
     return tested_list, untested, True
+
+
+# --------------------------------------------------------------------------- #
+#  Auto-Scan beim Öffnen des Games-Tabs
+# --------------------------------------------------------------------------- #
+# Viele Nutzer haben den "Spiele scannen"-Knopf schlicht übersehen und
+# standen vor einer leeren Liste. Der Tab scannt deshalb beim Öffnen selbst
+# — abschaltbar in den Einstellungen, aber standardmäßig AN.
+#
+# Dass das überhaupt geht, hängt am neuen Scanner: mit Steams eigener
+# VR-Kennzeichnung dauert ein Durchlauf Millisekunden statt Sekunden.
+AUTO_SCAN_DEFAULT = True
+
+
+def auto_scan_enabled():
+    """True, wenn der Games-Tab beim Öffnen selbst scannen soll."""
+    value = _load_app_config().get("games_auto_scan", AUTO_SCAN_DEFAULT)
+    if isinstance(value, bool):
+        return value
+    # Ältere Configs könnten "1"/"true" als Text enthalten.
+    return str(value).strip().lower() not in ("0", "false", "off", "no", "")
+
+
+def set_auto_scan(enabled):
+    """Merkt den Auto-Scan-Schalter dauerhaft."""
+    if not update_json(APP_CONFIG, {"games_auto_scan": bool(enabled)}):
+        log.warning("Auto-Scan-Einstellung konnte nicht gespeichert werden.")
+
+
+# --------------------------------------------------------------------------- #
+#  Von Hand ergänzte STEAM-Spiele
+# --------------------------------------------------------------------------- #
+# Steams VR-Kennzeichnung ist gut, aber nicht lückenlos: Beta-Zweige,
+# Spiele mit nachgerüstetem VR-Modus und Mod-Loader stehen dort oft nicht.
+# Statt die Erkennung mit Sonderfällen aufzuweichen (und damit wieder
+# Flachbildschirm-Spiele einzusammeln), darf der Nutzer gezielt nachhelfen.
+def load_manual_steam_appids():
+    """AppIDs, die der Nutzer selbst in die VR-Liste geholt hat."""
+    data = _load_app_config().get("games_manual_steam", [])
+    if not isinstance(data, list):
+        return []
+    return [str(a) for a in data if str(a).isdigit()]
+
+
+def add_manual_steam_appid(appid):
+    """Trägt ein Steam-Spiel fest in die VR-Liste ein. True = war neu."""
+    appid = str(appid)
+    if not appid.isdigit():
+        return False
+    # Wer ein entferntes Spiel von Hand wieder einträgt, will es sehen —
+    # sonst legt er den Eintrag an und die Liste bleibt trotzdem leer.
+    unhide_game(appid)
+    current = load_manual_steam_appids()
+    if appid in current:
+        return False
+    current.append(appid)
+    if not update_json(APP_CONFIG, {"games_manual_steam": current}):
+        log.warning("Manuelles Steam-Spiel konnte nicht gespeichert werden.")
+        return False
+    return True
+
+
+def remove_manual_steam_appid(appid):
+    """Nimmt den Handeintrag zurück. Das Spiel kann danach trotzdem noch in
+    der Liste stehen — nämlich dann, wenn Steam es ohnehin als VR führt."""
+    appid = str(appid)
+    current = load_manual_steam_appids()
+    if appid not in current:
+        return False
+    current.remove(appid)
+    if not update_json(APP_CONFIG, {"games_manual_steam": current}):
+        log.warning("Manuelles Steam-Spiel konnte nicht entfernt werden.")
+        return False
+    return True
+
+
+# --------------------------------------------------------------------------- #
+#  Aus der Liste entfernte Spiele
+# --------------------------------------------------------------------------- #
+# Die Erkennung liegt manchmal daneben: ein Flachbildschirm-Spiel mit einer
+# mitgelieferten VR-Bibliothek, ein Titel, dessen VR-Modus man nie benutzt.
+# Bisher konnte man so einen Eintrag nur ansehen — jedes Ausblenden hätte
+# beim nächsten Scan wieder von vorn begonnen.
+#
+# Das "Entfernen" im Detail-Panel schreibt die AppID deshalb dauerhaft hierher.
+# Zwei Wege zurück, beide ausdrücklich vom Nutzer:
+#   * das Spiel über "+ Spiel hinzufügen" wieder eintragen
+#   * Einstellungen -> Spiele -> "Games-Tab zurücksetzen"
+#
+# Bewusst NUR eine Liste von AppIDs und keine Kopie der Spieldaten: was
+# entfernt ist, soll nach dem Zurücksetzen wieder genau so auftauchen, wie der
+# Scan es findet — nicht so, wie es beim Entfernen einmal aussah.
+def load_hidden_games():
+    """AppIDs, die der Nutzer aus der Liste entfernt hat."""
+    data = _load_app_config().get("games_hidden", [])
+    if not isinstance(data, list):
+        return []
+    return [str(a) for a in data if str(a)]
+
+
+def hide_game(appid):
+    """Entfernt ein Spiel dauerhaft aus der Liste. True = war noch drin.
+
+    Ein vorhandener Handeintrag wird dabei mit gelöscht. Sonst stünden zwei
+    gegensätzliche Wünsche in der Config ("immer zeigen" und "nie zeigen"),
+    und welcher gewinnt, wäre eine Frage der Auswertungsreihenfolge statt
+    einer Entscheidung des Nutzers.
+    """
+    appid = str(appid)
+    current = load_hidden_games()
+    if appid in current:
+        return False
+    remove_manual_steam_appid(appid)
+    current.append(appid)
+    if not update_json(APP_CONFIG, {"games_hidden": current}):
+        log.warning("Entfernte Spiele konnten nicht gespeichert werden.")
+        return False
+    return True
+
+
+def unhide_game(appid):
+    """Holt ein einzelnes entferntes Spiel zurück."""
+    appid = str(appid)
+    current = load_hidden_games()
+    if appid not in current:
+        return False
+    current.remove(appid)
+    if not update_json(APP_CONFIG, {"games_hidden": current}):
+        log.warning("Entfernte Spiele konnten nicht gespeichert werden.")
+        return False
+    return True
+
+
+def clear_hidden_games():
+    """"Games-Tab zurücksetzen": alle entfernten Spiele wieder anzeigen.
+    Rückgabe: wie viele zurückgeholt wurden."""
+    current = load_hidden_games()
+    if not current:
+        return 0
+    if not update_json(APP_CONFIG, {"games_hidden": []}):
+        log.warning("Entfernte Spiele konnten nicht zurückgesetzt werden.")
+        return 0
+    return len(current)
+
+
+# --------------------------------------------------------------------------- #
+#  Eigene Spiele (alles, was NICHT über Steam läuft)
+# --------------------------------------------------------------------------- #
+# Itch.io, GOG, selbst gebaute Builds, AppImages, eine entpackte Demo — dafür
+# gibt es keine AppID und damit auch kein Steam-Startkommando. Solche
+# Einträge tragen deshalb eine eigene Kennung "local:<n>" und werden direkt
+# als Prozess gestartet.
+#
+# Die Kennung ist bewusst ein STRING mit Präfix und keine fortlaufende Zahl:
+# im Games-Tab liegen eigene Einträge und Steam-Spiele im selben Verzeichnis
+# (Kacheln, aufgeklapptes Panel, gemerkte Startparameter). Mit dem Präfix
+# kann keine Stelle die beiden je verwechseln — steam_appinfo.is_steam_appid()
+# entscheidet das an einer Stelle für alle.
+LOCAL_PREFIX = "local:"
+
+
+def is_local_id(value):
+    """True für die Kennung eines eigenen Spiels ('local:3')."""
+    return str(value or "").startswith(LOCAL_PREFIX)
+
+
+def load_local_games():
+    """
+    Die eigenen Spiele des Nutzers.
+    Rückgabe: [{"id", "name", "exe", "launch_options"}] nach Name sortiert.
+    """
+    data = _load_app_config().get("games_local", [])
+    if not isinstance(data, list):
+        return []
+    out = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        gid = str(entry.get("id", "") or "")
+        name = str(entry.get("name", "") or "").strip()
+        exe = str(entry.get("exe", "") or "").strip()
+        if not gid or not name or not exe:
+            continue
+        out.append({
+            "id": gid,
+            "name": name,
+            "exe": exe,
+            "launch_options": str(entry.get("launch_options", "") or "").strip(),
+        })
+    out.sort(key=lambda g: g["name"].lower())
+    return out
+
+
+def _save_local_games(entries):
+    if not update_json(APP_CONFIG, {"games_local": entries}):
+        log.warning("Eigene Spiele konnten nicht gespeichert werden.")
+        return False
+    return True
+
+
+def _next_local_id(entries):
+    """Kleinste freie Nummer. Nach dem Löschen eines Eintrags werden Nummern
+    wiederverwendet — die Kennung ist eine Verknüpfung, kein Verlauf."""
+    used = set()
+    for e in entries:
+        m = re.match(re.escape(LOCAL_PREFIX) + r"(\d+)$", e.get("id", ""))
+        if m:
+            used.add(int(m.group(1)))
+    n = 1
+    while n in used:
+        n += 1
+    return f"{LOCAL_PREFIX}{n}"
+
+
+def add_local_game(name, exe, launch_options=""):
+    """
+    Legt ein eigenes Spiel an.
+    Rückgabe: (ok, kennung_oder_fehlerschlüssel)
+      Fehlerschlüssel: "no_name" | "no_exe" | "not_found" | "save_failed"
+    Die Schlüssel sind absichtlich keine fertigen Sätze — die Oberfläche
+    übersetzt sie, damit die Meldung in der eingestellten Sprache erscheint.
+    """
+    name = (name or "").strip()
+    exe = (exe or "").strip()
+    if not name:
+        return False, "no_name"
+    if not exe:
+        return False, "no_exe"
+    exe = os.path.abspath(os.path.expanduser(exe))
+    if not os.path.isfile(exe):
+        return False, "not_found"
+
+    entries = load_local_games()
+    gid = _next_local_id(entries)
+    entries.append({"id": gid, "name": name, "exe": exe,
+                    "launch_options": (launch_options or "").strip()})
+    if not _save_local_games(entries):
+        return False, "save_failed"
+    return True, gid
+
+
+def update_local_game(gid, **fields):
+    """Ändert Felder eines eigenen Spiels (name/exe/launch_options)."""
+    entries = load_local_games()
+    changed = False
+    for entry in entries:
+        if entry["id"] != str(gid):
+            continue
+        for key in ("name", "exe", "launch_options"):
+            if key in fields and fields[key] is not None:
+                entry[key] = str(fields[key]).strip()
+                changed = True
+    return _save_local_games(entries) if changed else False
+
+
+def remove_local_game(gid):
+    """Löscht ein eigenes Spiel. Die Datei auf der Platte bleibt unberührt."""
+    entries = load_local_games()
+    rest = [e for e in entries if e["id"] != str(gid)]
+    if len(rest) == len(entries):
+        return False
+    return _save_local_games(rest)
+
+
+def local_game(gid):
+    """Ein einzelner eigener Eintrag oder None."""
+    for entry in load_local_games():
+        if entry["id"] == str(gid):
+            return entry
+    return None
+
+
+def local_launch_cmd(entry):
+    """
+    Startbefehl für ein eigenes Spiel.
+    Rückgabe: (befehl_als_liste, fehlerschlüssel)
+      Fehlerschlüssel: "" | "not_found" | "no_wine" | "not_executable"
+
+    Unterstützt wird, was auf einem Linux-Desktop vorkommt: native Binaries,
+    *.x86_64 aus Unity-Builds, AppImages, Start-Skripte (*.sh) und
+    Windows-Programme (*.exe) über Wine.
+
+    Windows-Programme laufen bewusst über wine und NICHT über Proton: Proton
+    braucht ein von Steam verwaltetes Prefix samt AppID, und genau die hat
+    ein eigener Eintrag ja nicht. Wer Proton möchte, trägt das Spiel in Steam
+    als Nicht-Steam-Spiel ein — dann taucht es hier ohnehin mit AppID auf.
+    """
+    exe = (entry or {}).get("exe", "")
+    exe = os.path.expanduser(exe or "")
+    if not exe or not os.path.isfile(exe):
+        return None, "not_found"
+
+    try:
+        args = shlex.split(entry.get("launch_options", "") or "")
+    except ValueError:
+        # Unpaarige Anführungszeichen: lieber roh zerlegen als gar nicht
+        # starten. Der Nutzer sieht das Ergebnis im Feld und kann es richten.
+        args = (entry.get("launch_options", "") or "").split()
+
+    if exe.lower().endswith(".exe"):
+        wine = shutil.which("wine")
+        if not wine:
+            return None, "no_wine"
+        return [wine, exe] + args, ""
+
+    if not os.access(exe, os.X_OK):
+        # Ein *.sh ohne Ausführungsrecht ist der Normalfall bei entpackten
+        # Archiven. Über den Interpreter zu starten ist freundlicher, als den
+        # Nutzer erst chmod nachschlagen zu lassen.
+        if exe.lower().endswith(".sh"):
+            return ["sh", exe] + args, ""
+        return None, "not_executable"
+
+    return [exe] + args, ""
 
 
 def save_cached_games(tested, untested):
@@ -1024,8 +1543,19 @@ def download_cover(appid, timeout=8):
         return dest
 
     os.makedirs(COVER_CACHE_DIR, exist_ok=True)
-    for name in STEAM_CDN_NAMES:
-        url = f"{STEAM_CDN_BASE}/{appid}/{name}"
+
+    # Eine in games.json hinterlegte Bild-URL gewinnt. Notwendig, weil Steams
+    # Bildpfade nicht durchgaengig nach dem Muster .../<appid>/header.jpg
+    # aufgebaut sind: neuere Titel haben einen Hash im Pfad (Thief VR ist so
+    # ein Fall). Fuer die raten wir sonst zweimal daneben und die Kachel
+    # bleibt beim Platzhalter.
+    urls = []
+    entry = GAMES.get(str(appid))
+    if entry and entry.get("picture"):
+        urls.append(entry["picture"])
+    urls += [f"{STEAM_CDN_BASE}/{appid}/{name}" for name in STEAM_CDN_NAMES]
+
+    for url in urls:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "yakuda-connect"})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -1054,6 +1584,12 @@ def get_game_cover(appid, allow_download=True):
       3. Download vom Steam-CDN (nur wenn allow_download=True)
     Rueckgabe: Pfad oder None.
     """
+    # Eigene Spiele haben keine AppID und damit auch kein Steam-Cover. Ohne
+    # diese Abfrage wuerde die Kachel eines eigenen Eintrags einen Download
+    # auf https://.../store_item_assets/steam/apps/local:3/... ausloesen —
+    # ein Netzwerkaufruf, der nur scheitern kann.
+    if not steam_appinfo.is_steam_appid(appid):
+        return None
     local = find_game_cover(appid)
     if local:
         return local
