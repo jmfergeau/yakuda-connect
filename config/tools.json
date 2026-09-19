@@ -1,7 +1,7 @@
 {
   "info": {
-    "version": "1.2.7",
-    "last_updated": "2026-09-12"
+    "version": "1.3.1",
+    "last_updated": "2026-09-19"
   },
   "_comment": "Werkzeugliste des Tools-Tabs. Feldbedeutung siehe Kopf von core/programs.py. Eigene Eintraege gehoeren NICHT hier hinein, sondern in die Nutzerkopie unter ~/.config/yakuda-connect/config/tools.json — die wird zusaetzlich eingelesen und ueberlebt jedes App-Update.",
   "apps": [
@@ -138,6 +138,7 @@
       "desc": "VR-App per Kabel auf dem Headset installieren (Android-basiert).",
       "desc_eng": "Install VR apps directly on your headset via USB cable (Android-based).",
       "start_cmd": "android-tools",
+      "terminal": true,
       "link": "https://developer.android.com/tools?hl=de",
       "install_methods": [
         "appimage",
@@ -170,12 +171,15 @@
       "desc": "Terminal-Oberflaeche zum Bearbeiten von OpenVR-Bindings fuer xrizer, VapoR und OpenComposite — statt die JSON-Dateien von Hand zu schreiben. Findet Steam-Titel selbst; fuer Nicht-Steam-Titel den Spielordner uebergeben.",
       "desc_eng": "Terminal UI for editing OpenVR bindings for xrizer, VapoR and OpenComposite instead of writing the JSON by hand. Finds Steam titles on its own; pass the game folder for non-Steam titles.",
       "start_cmd": "obah",
+      "terminal": true,
       "link": "https://github.com/galister/obah",
       "install_methods": [
-        "aur"
+        "aur",
+        "cargo"
       ],
-      "note": "Laeuft im Terminal (TUI), nicht als Fenster — fuer Autostart daher wenig sinnvoll. Nicht-Arch-Nutzer:  cargo install obah  oder die portable Binary aus den Releases.",
-      "note_eng": "Runs in the terminal (TUI), not as a window — so it makes little sense for autostart. Non-Arch users:  cargo install obah  or the portable binary from Releases."
+      "crate": "obah",
+      "note": "Laeuft im Terminal (TUI), nicht als Fenster — fuer Autostart daher wenig sinnvoll. Methode \"Cargo\" funktioniert auf jeder Distro: baut obah nach ~/.config/yakuda-connect/tools/cargo/obah und installiert Rust bei Bedarf mit.",
+      "note_eng": "Runs in the terminal (TUI), not as a window — so it makes little sense for autostart. The \"Cargo\" method works on any distro: builds obah into ~/.config/yakuda-connect/tools/cargo/obah and installs Rust if needed."
     },
     {
       "key": "xr-hotas",
@@ -185,10 +189,28 @@
       "desc": "Macht die VR-Controller zu Schubhebel und Joystick fuer Spiele, die keine Motion-Controller, aber Gamepads unterstuetzen (Elite: Dangerous, DCS World). Griff halten aktiviert die Achsen.",
       "desc_eng": "Turns your VR motion controllers into throttle and joystick for games that support gamepads but not motion controllers (Elite: Dangerous, DCS World). Hold grip to activate the axes.",
       "start_cmd": "xr-hotas",
+      "terminal": true,
       "link": "https://github.com/galister/xr-hotas",
-      "install_methods": [],
-      "note": "Kein Paket und kein AppImage vorhanden — Installation nur ueber Cargo:  cargo install --git https://github.com/galister/xr-hotas.git   Danach liegt der Befehl unter ~/.cargo/bin/xr-hotas.",
-      "note_eng": "No package or AppImage available — install via Cargo only:  cargo install --git https://github.com/galister/xr-hotas.git   The command then lives at ~/.cargo/bin/xr-hotas."
+      "install_methods": [
+        "cargo"
+      ],
+      "cargo_git": "https://github.com/galister/xr-hotas.git",
+      "cargo_sys_deps": {
+        "arch": [
+          "openxr"
+        ],
+        "fedora": [
+          "openxr-devel"
+        ],
+        "debian": [
+          "libopenxr-dev"
+        ],
+        "suse": [
+          "openxr-devel"
+        ]
+      },
+      "note": "Wird per Cargo direkt aus dem GitHub-Repo gebaut (OpenXR-Bibliothek und Rust werden bei Bedarf mitinstalliert). Braucht Schreibzugriff auf /dev/uinput — den bringen Steams udev-Regeln mit (Paket steam-devices bzw. steam).",
+      "note_eng": "Built with Cargo straight from the GitHub repo (OpenXR library and Rust are installed if needed). Needs write access to /dev/uinput — Steam's udev rules provide it (package steam-devices or steam)."
     },
     {
       "key": "vivehub-linux",

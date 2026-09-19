@@ -13,11 +13,14 @@ Felder:
 
 Installationsmethoden (distro-abhängig automatisch gefiltert):
   install_methods : Liste erlaubter Methoden, Teilmenge von
-                    {"appimage", "aur", "flatpak"}. Fehlt das Feld, wird aus
+                    {"appimage", "aur", "flatpak", "rpm", "cargo"}. Fehlt das Feld, wird aus
                     install_type/Feldern abgeleitet.
                       * "aur"     -> nur auf Arch-Distros, wenn yay oder paru da ist
                       * "appimage"-> überall, wenn github_repo/appimage_url gesetzt
                       * "flatpak" -> überall, wenn flatpak installiert + flatpak_id gesetzt
+                      * "cargo"   -> überall; baut per 'cargo install' nach
+                                     ~/.config/yakuda-connect/tools/cargo/<key>/
+                                     (Rust/Compiler werden bei Bedarf nachinstalliert)
                     Sind mehrere Methoden verfügbar, zeigt die Karte ein
                     Dropdown. Vorauswahl: AppImage; sonst yay; sonst die erste.
   github_repo      : "owner/repo" -> neueste passende Release wird automatisch geholt
@@ -27,10 +30,20 @@ Installationsmethoden (distro-abhängig automatisch gefiltert):
                      ".AppImage" (Arch automatisch) | "_x64.AppImage" | "x86_64.AppImage"
   include_prerelease: True/False -> auch Vorab-Versionen berücksichtigen
   flatpak_id       : Flatpak-App-ID (z. B. "com.vysp3r.ProtonPlus")
+  crate            : Name des Rust-Crates fuer "cargo" (Standard: key)
+  cargo_git        : Git-URL -> "cargo install --git <url>" statt crates.io
+  cargo_sys_deps   : {"arch": [...], "fedora": [...], "debian": [...], "suse": [...]}
+                     Systempakete, die vor dem Cargo-Build da sein muessen
   config_dirs      : Ordnernamen in ~/.config zur Erkennung/zum Löschen
   icon_url         : Icon (GitHub blob- oder raw-URL)
   launch_args      : Zusätzliche Startargumente für die AppImage
                      (z. B. VRCX: "--no-install --no-desktop").
+  terminal         : true -> der "▶ Starten"-Knopf der Karte öffnet ein
+                     Terminalfenster statt das Programm still zu starten.
+                     Für Kommandozeilenprogramme (obah ist eine TUI,
+                     XR HOTAS und adb schreiben auf die Konsole) — ohne
+                     Terminal sähe man von ihnen gar nichts.
+                     Gestartet wird über core/tool_launcher.py.
   remove_entries   : Vom Programm selbst angelegte .desktop-/Autostart-Dateien,
                      die bei Installation/Deinstallation entfernt werden (Pfade mit ~).
   note / note_eng  : Optionaler Hinweis (klein, kursiv, gelb) unter der

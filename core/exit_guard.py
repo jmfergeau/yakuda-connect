@@ -316,6 +316,12 @@ class ExitGuard:
 # --------------------------------------------------------------------------- #
 _signal_refs = []    # Socket-Paar + Notifier muessen am Leben bleiben
 
+# True, sobald ein Signal (Abmelden, Herunterfahren, kill) das Beenden
+# ausgeloest hat. Dann darf closeEvent keine Rueckfrage mehr zeigen — ein
+# modaler Dialog wuerde das Abmelden blockieren, und der Sitzungsmanager
+# wartet nicht.
+quit_requested_by_signal = False
+
 
 def install_quit_signals(app):
     """SIGTERM/SIGINT/SIGHUP → alle Fenster schliessen (= closeEvent) → quit."""
@@ -344,6 +350,8 @@ def install_quit_signals(app):
     notifier.activated.connect(_drain)
 
     def _handler(signum, _frame):
+        global quit_requested_by_signal
+        quit_requested_by_signal = True
         log.info("Signal %s empfangen — App wird geordnet beendet.",
                  signal.Signals(signum).name)
         QApplication.closeAllWindows()

@@ -41,6 +41,9 @@ DEFAULT_SETTINGS = {
     "encoder": "Auto",
     "codec": "Automatic",
     "bitrate": 100,
+    # Streaming -> Grafikkarte: "" = automatisch, sonst "vendor:device"
+    # (z. B. "1002:73df", siehe core/gpu_select.py).
+    "gpu_device": "",
     # Einstellungen -> Erweitert / System -> "WiVRn-Server mit der App
     # beenden". Schluessel und Standard kommen aus core/exit_guard.py.
     "stop_server_with_app": True,
@@ -202,6 +205,19 @@ def sync_with_wivrn(config_data):
         encoder_obj = {"encoder": encoder_name}
         if codec:
             encoder_obj["codec"] = codec
+        # --- Grafikkarte auch WiVRn mitteilen ---------------------------
+        # Die Umgebungsvariablen beim Serverstart legen fest, auf welcher
+        # Karte WiVRn rendert. Der vaapi-Encoder hat zusaetzlich ein eigenes
+        # Feld fuer das Geraet ("device", laut docs/configuration.md in der
+        # Form "/dev/dri/renderD128"); ohne das kann das Kodieren auf einer
+        # anderen Karte landen als das Rendern. Nur vaapi kennt das Feld —
+        # nvenc und x264 wuerden mit einem unbekannten Schluessel nichts
+        # anfangen, deshalb steht es auch nur dort.
+        if encoder_name == "vaapi":
+            import gpu_select
+            gpu = gpu_select.find_gpu(config_data.get("gpu_device", ""))
+            if gpu and gpu.get("render_node"):
+                encoder_obj["device"] = gpu["render_node"]
 
     if venv.wivrn_at_least(25, 12):
         # Neues Format: ein einzelnes Objekt unter "encoder".

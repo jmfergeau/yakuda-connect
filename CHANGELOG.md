@@ -1,6 +1,238 @@
 # Changelog - Yakuda Connect
 
-### 🚀 v1.3.0
+### 🚀 v1.3.1 — 2026-09-19
+
+#### 🇩🇪 Deutsch
+
+**Neue Installationsmethode „Cargo“ im Tools-Tab**
+
+* **obah und XR HOTAS lassen sich jetzt auf jeder Distribution direkt aus der App installieren.** Bisher gab es obah nur über das AUR, XR HOTAS gar nicht — beide Karten zeigten nur einen Hinweis zum Abtippen.
+* **Alles läuft in einem sichtbaren Terminal.** Das Skript prüft der Reihe nach: C-Compiler, benötigte Systembibliotheken, Rust/Cargo, dann den Build. Fehlt etwas, wird es nachinstalliert (sudo-Passwort im Terminal).
+* **Rust wird bei Bedarf mitgebracht.** Arch und Fedora nehmen das Paket der Distribution. Auf Ubuntu/Debian ist das apt-Rust zu alt (1.75, beide Tools brauchen mindestens 1.85) — dort installiert das Skript rustup für den eigenen Benutzer, ohne sudo.
+* **Fehler bleiben sichtbar.** Bei einem Fehler erscheint eine rote Meldung, und das Terminal bleibt offen, bis Enter gedrückt wird. Jede Ausgabe steht zusätzlich in `install.log` im Tool-Ordner; die Karte zeigt den Pfad an.
+* **Alles liegt in einem eigenen Ordner:** `~/.config/yakuda-connect/tools/cargo/<tool>/`, gebaut mit `cargo install --root`. Ohne `--root` landete die Binary in `~/.cargo/bin`, egal in welchem Ordner man steht. Der Startbefehl wird nach `~/.local/bin` verlinkt.
+* **Status, Update und Löschen wie bei AppImages.** Die Karte zeigt „Installiert (Cargo)“ mit Version. obah vergleicht mit crates.io, XR HOTAS mit dem neuesten Commit im GitHub-Repo. „Löschen“ entfernt Ordner und Link ohne sudo; Rust selbst bleibt installiert.
+* **XR HOTAS: OpenXR-Bibliothek wird mitinstalliert.** Ohne sie scheitert der Build am Linker (`cannot find -lopenxr_loader`). Pakete: `openxr` (Arch), `openxr-devel` (Fedora/openSUSE), `libopenxr-dev` (Ubuntu/Debian).
+* **Ein kaputtes Fremd-Repository bricht die Installation nicht mehr ab.** `apt-get update` darf scheitern (z. B. wegen einer alten PPA); installiert wird trotzdem.
+* **Neues Modul `core/cargo_installer.py`**, neue tools.json-Felder `crate`, `cargo_git` und `cargo_sys_deps`.
+
+**Neuer Tab „Controls“**
+
+* **Neuer Seitenleisten-Eintrag „Controls“** zwischen Games und Settings, mit zwei Schaltern: „Stick-Steuerung über XR HOTAS“ (oben) und „Controls über obah“.
+* **Einschalten prüft, ob das Werkzeug installiert ist.** Wenn ja, bleibt der Schalter an. Wenn nicht, fragt ein Fenster, wie installiert werden soll: ein Knopf je Methode, die auf diesem System geht (Cargo, yay, paru, …), jeweils mit einer Zeile Erklärung.
+* **Installiert wird über den Tools-Tab**, nicht über einen eigenen Weg: dasselbe sichtbare Terminal, dieselbe Fehleranzeige, dieselbe Karte. Während der Installation ist der Schalter gesperrt.
+* **Abbruch oder Fehler schalten den Schalter wieder aus** und sagen, wo die Fehlermeldung steht. Läuft im Tools-Tab schon eine andere Installation, wird gewartet statt eine zweite zu starten.
+* **Wird das Werkzeug im Tools-Tab gelöscht, geht der Schalter aus.** Der Zustand wird in `config.json` gemerkt (`controls_xr_hotas`, `controls_obah`); nach einem Neustart zählt „an“ nur, wenn das Werkzeug noch da ist.
+* **„▶ Starten“** öffnet das installierte Werkzeug in einem Terminal. Beendet es sich mit Fehler, bleibt das Fenster offen.
+* **Neu: `core/tabs/controls_mixin.py`, `appimage_installer.installed_locally()`** (schnelle Prüfung ohne Netz). Die Seitenindizes für Settings werden jetzt über `pages.indexOf(tab_settings)` bestimmt statt fest als 5.
+* **Neu: `tests/test_controls_tab.py`.**
+
+**Controls-Tab: einklappbarer Bereich „Controls per obah“**
+
+* **Drei Dropdowns wie die drei Schritte in obah:** ① Spiel, ② Controller, ③ Bindings laden. Beim ersten Öffnen des Tabs klappt der Bereich auf und sucht im Hintergrund; danach lässt er sich ein- und ausklappen.
+* **Voreinstellung beim ersten Öffnen:** VRChat (falls installiert) · Oculus/Meta Touch · xrizer-Bindings. Gibt es für die Auswahl keine xrizer-Datei, wird der erste verfügbare Eintrag genommen. Was du selbst wählst, bleibt beim Spielwechsel stehen; automatisch Erzwungenes (z. B. „Von vorne beginnen“ bei einem Spiel ohne Bindings) nicht.
+* **① Spiel:** alle installierten Steam-Spiele mit OpenVR-Action-Datei (`actions.json`, `action_manifest.json`, `vr_actions.json`, `steamvr_actions.json`), alphabetisch — dieselben Regeln wie obah. Eine bewusste Abweichung: obah sucht den Spielordner über den Spielnamen, Steam legt ihn aber unter `installdir` ab. Weichen die ab (Doppelpunkte, Zusätze wie „Deluxe“), übersieht obah das Spiel; hier taucht es auf.
+* **② Controller:** obahs sieben Profile mit lesbaren Namen (z. B. „Valve Index (Knuckles)“) und dahinter, welche Bindings es fürs gewählte Spiel schon gibt (`✓ Default, xrizer` bzw. „keine Bindings“). Vorausgewählt wird der erste Controller mit Bindings; einen selbst gewählten Controller behält die Auswahl beim Spielwechsel.
+* **③ Bindings laden:** nur die Quellen, die es gibt, in obahs Reihenfolge — Spiel-Standard, xrizer, VapoR, OpenComposite — und immer „Von vorne beginnen“. Darunter steht, welche Datei geladen würde.
+* **Fehlende Dateien werden angezeigt.** Manche Spiele verweisen im Manifest auf Bindings, die sie gar nicht mitliefern; obah startet dann ohne Meldung leer. Hier steht stattdessen „⚠ Datei fehlt: …“.
+* **Gegen das echte obah geprüft:** Spieleliste und Häkchen je Controller stimmen mit obah 0.1.1 überein (bis auf die Abweichung oben).
+* **Neu: `core/obah_bindings.py`, `tests/test_obah_bindings.py`.**
+
+**Bindings-Ansicht unter der Auswahl**
+
+* **Action Sets als Tabs**, benannt wie in obah — bei VRChat „Global (L/R)“, „One Hand“, „Menu“, „Action Menu“, „Drone (L/R)“. Gibt das Spiel Anzeigenamen mit (`localization` in der actions.json), werden die genommen, auf Deutsch bevorzugt die deutschen.
+* **Beide Controller nebeneinander, SteamVR-Stil:** eine Zeichnung je Hand, außen je Eingabe eine Karte („Als Trigger · Ziehen → Rennen · Klick → Benutzen“), und eine Linie von der Karte zur Taste. Belegte Eingaben haben eine durchgezogene Linie, freie eine gestrichelte. Beim Überfahren leuchten Karte, Linie und Punkt auf; der Tooltip zeigt die vollen Pfade.
+* **Die Tastenpositionen kommen aus obahs Controller-Profilen** (`binding_image_point`), damit sitzen die Linien dort, wo auch SteamVR sie ansetzt. Die Controller-Zeichnung ist eine eigene, schematische Grafik — für **alle sieben** Controller des Dropdowns ausgearbeitet. Die rechte Hand ist die gespiegelte linke, wie in SteamVR.
+* **Welche Eingaben auf welcher Seite, welche Zeilen je Modus, wie Pfade zugeordnet werden** — alles nach obahs Regeln (`edit_bindings.rs`). Unbekannte Eingaben aus der Datei werden mit angezeigt statt verschluckt.
+* **Passt sich der Fensterbreite an:** nebeneinander, bei schmalem Fenster untereinander. Der Controls-Tab scrollt jetzt; Titel und Untertitel bleiben stehen.
+* **Kaputte Dateien** (ungültiges JSON, keine Action Sets) zeigen eine lesbare Meldung statt einer leeren Ansicht.
+* **Neu: `core/obah_editor.py`, `ui/controller_view.py`, `tests/test_obah_editor.py`.**
+
+**Bindings bearbeiten (wie obah)**
+
+* **Klick auf eine Karte öffnet das Bearbeiten-Fenster**, aufgebaut wie obahs Popup: links die Bindings der Taste („#1 Joystick · Move“), rechts das gewählte Binding.
+* **Alles, was obah dort kann:** Binding hinzufügen und entfernen, Modus wählen (nur die Modi, die diese Taste kann), je Feld eine Aktion wählen (nur Aktionen des Action Sets mit passendem Typ, oder „keine“), Parameter hinzufügen (bekannte mit Beschreibung wie Totzone oder Achse umkehren, oder eigene), ändern und entfernen. Werte mit `json:` davor werden als JSON gespeichert, wie in obah.
+* **Nichts geht still verloren:** Unbekannte Modi, Felder und Aktionen aus der Datei bleiben erhalten und wählbar. Beim Moduswechsel fallen — wie in obah — nur die Felder weg, die der neue Modus nicht kennt.
+* **„Übernehmen“ ändert die Belegung im Tab, „Speichern“ schreibt die Datei** — als xrizer-, VapoR- oder OpenComposite-Binding (Pfeil am Knopf), an dieselbe Stelle wie obah. Standardziel ist die geladene Quelle, sonst xrizer. **Eine vorhandene Datei wird vorher als `.bak` gesichert** (obah überschreibt ohne Sicherung). Geschrieben wird atomar.
+* **Ungespeicherte Änderungen sind sichtbar** (● in der Statuszeile) und gehen beim Wechsel von Spiel, Controller oder Quelle nicht verloren: Es kommt die Frage „Speichern oder Verwerfen“. Dazu ein Knopf „Verwerfen“.
+* **Karten wachsen mit ihrem Inhalt:** Kommt ein Binding dazu, wird die Karte höher und die Karten darunter rücken nach.
+* **Karten und Controller lassen sich verschieben:** Karte ziehen = Karte verschieben, Zeichnung ziehen = Controller verschieben. Ein Klick ohne Ziehen öffnet weiterhin das Fenster. Die Anordnung wird je Controller und Hand gemerkt (`controls_layout.json`); „Anordnung zurücksetzen“ stellt die automatische wieder her. Linien starten an der Kartenkante, die dem Punkt zugewandt ist.
+* **Neu: `ui/binding_dialog.py`, `tests/test_obah_edit.py`.**
+
+**Controls-Tab: Feinschliff, Profile, Posen und Chords**
+
+* **Aufklapplisten haben jetzt einen Hintergrund.** Unter KDE/Breeze ist die Liste einer Combobox ein eigenes, halbdurchsichtiges Fenster — mit dem dunklen Stylesheet stand dort nur der Text, der Inhalt dahinter schien durch. Die Durchsicht ist für diese Listen abgeschaltet, und ein Ereignisfilter setzt das erneut, wenn der Stil es beim Anzeigen zurückdreht (neu: `ui/opaque_combo.py`).
+* **Benannte Profile über der Auswahl.** „Speichern unter …“ legt Anordnung *und* Belegung unter einem eigenen Namen ab, „Laden“ holt sie zurück, „Löschen“ entfernt sie (`controls_profiles.json`). Gehört ein Profil zu einem anderen Controllertyp, wird gefragt und nur die Anordnung übernommen — eine Belegung gehört zu genau einem Controller. Eine geladene Belegung ist eine ungespeicherte Änderung, bis du speicherst.
+* **Alle Controller gezeichnet:** Oculus/Meta Touch, Valve Index (Knuckles), Vive Wand, Vive Focus 3, Hand-Tracking, Gamepad und Oculus Rift CV1 — jeder mit seiner eigenen Form, Tasten, Trigger, Griff und Ringen.
+* **Controller verschieben bewegt nur den Controller.** Vorher wanderten die Karten mit. Die Zeichnung hat jetzt ihren eigenen Versatz; die Karten bleiben, wo sie sind, und nur die Linien folgen.
+* **Karten rasten ein, statt sich zu überlagern.** Beim Ziehen zeigt eine Lücke, wo die Karte landet; die Karte darunter rückt nach unten, und beim Loslassen schließt sich die Lücke ohne Überlappung. Damit lässt sich jede Reihenfolge herstellen und alles wieder zurückschieben. Gemerkt wird die Reihenfolge, nicht mehr freie Koordinaten — alte `controls_layout.json` werden beim Laden umgerechnet (nach ihrer Höhe sortiert).
+* **Nachfrage beim Schließen.** Beendet man die App mit ungespeicherten Änderungen, kommt „Speichern / Verwerfen / Abbrechen“; „Abbrechen“ lässt die App offen. Ein Beenden über Signal (Strg-C, Abmelden) fragt nicht, da dort niemand antworten kann.
+* **Posen, Haptik und Skelett** in einem eigenen Kasten unter den Controllern — wie obahs „Other“-Bereich: je Eintrag Quelle und Aktion, dazu je Art eine Zeile zum Hinzufügen, sofern das Action Set eine passende Aktion hat. Das System-Feld (`/input/system`) bleibt außen vor, genau wie in obah.
+* **Chords (Tastenkombinationen)** im zweiten Kasten: mehrere Quellen mit ihrer Art (gehalten, einzeln, Klick, Berührung) auf eine Aktion. Quellen lassen sich hinzufügen und entfernen, eine bleibt immer stehen. Gespeichert wird im obah-Format (`["pfad", "held"]`).
+* **Neu: `ui/opaque_combo.py`, `tests/test_obah_aux.py`.**
+
+**README**
+
+* **Controls-Tab und Cargo-Weg in „Key Features“.**
+* **Datenschutz-Abschnitt vervollständigt.** Neue Verbindungen (crates.io, Cargo-Downloads, rustup), `sudo` beim Cargo-Weg, neue Dateien und Ordner — inklusive der Zeile, die rustup in die Shell-Profile schreibt, falls es Rust installieren muss, sowie `controls_layout.json`, `controls_profiles.json` und was beim Speichern in den Spielordner geschrieben wird (jetzt auch `poses`, `skeleton`, `haptics`, `chords`).
+* **Dezenter Transparenzhinweis ganz unten** zur Entwicklung mit KI-Assistenten.
+
+**Tools-Tab**
+
+* **Fester Abstand unter den Reitern „Anwendungen“/„OSC-Apps“.** Beim Scrollen liefen die Karten bis direkt an die Unterkante der Reiter, oben blieb ein Streifen der letzten Karte sichtbar. Der 10-px-Abstand ist jetzt Teil des Scrollbereichs-Rahmens (`setViewportMargins`) und scrollt nicht mehr mit.
+
+**Controls-Tab: austauschbare Controller-Bilder, mittige Controller, weniger Höhe**
+
+* **Die Controller-Zeichnungen liegen jetzt als PNG in `assets/controls`** und lassen sich austauschen, ohne Code anzufassen: `<controller>_left.png` / `<controller>_right.png`, bei Gamepad und Rift `<controller>.png`. Auch `.svg`, `.webp` und `.jpg` werden gelesen. Fehlt eine Datei, zeichnet die App wie bisher selbst.
+* **Eigene Bilder können nach `~/.config/yakuda-connect/controls/`** — dieser Ordner hat Vorrang vor `assets/controls` und bleibt bei Updates unangetastet. `scripts/render_controller_textures.py` erzeugt die mitgelieferten Bilder neu; sie taugen als Vorlage zum Übermalen (Seitenverhältnis beibehalten, sonst sitzen die Punkte neben den Tasten).
+* **Linker und rechter Controller sitzen jetzt auf halber Höhe des Kastens**, also mittig zur Kartenspalte statt oben am Rand. Ein selbst verschobener Controller bleibt, wo er hingeschoben wurde.
+* **Einklappen klappt wirklich alles ein.** Wird „Controls per obah“ zugeklappt, verschwinden auch Action Sets, beide Controller und die unteren Kästen. Geladen bleibt alles: Auswahl, Änderungen und der Speichern-Zustand stehen beim Aufklappen unverändert da.
+* **Der untere Teil (Posen, Vibration, Chords) ist ein eigener Aufklapp-Abschnitt** und standardmäßig zu. Das spart die Höhe von zwei Kästen; gefüllt werden die Listen trotzdem, sie sind nur nicht zu sehen.
+
+**Controls-Tab: Aufgeräumt-Modus**
+
+* **Neuer Knopf „Aufgeräumt“** neben „Anordnung zurücksetzen“: die Karten zeigen dann nur noch den Namen der Taste („Joystick“) statt der ganzen Belegung. Ein Pfeil hinter dem Typ zeigt, dass da noch etwas ist; Linie und Punkt am Controller bleiben, ein Klick öffnet weiterhin das Bearbeiten-Fenster.
+* **Rechtsklick auf eine Karte** klappt genau diese auf oder zu („Belegung anzeigen/verstecken“), dazu „Alle anzeigen“ und „Alle verstecken“. Der Rechtsklick neben die Karten zeigt nur die beiden Alle-Einträge — so kommt man auch aus einem komplett zugeklappten Controller wieder heraus.
+* **Knopf und Karten halten sich gegenseitig auf Stand:** versteckt man die letzte Karte von Hand, rastet der Knopf von selbst ein; holt man eine wieder hervor, springt er heraus.
+* **Wird je Controller und Hand gemerkt** (`controls_layout.json`, Feld `compact`) und gehört damit auch zu den benannten Profilen. „Anordnung zurücksetzen“ holt alles wieder hervor.
+
+**Tools-Tab: Programme direkt starten**
+
+* **Jede Karte hat jetzt „▶ Starten“** — in derselben Zeile wie der Startbefehl, also genau dann sichtbar, wenn das Werkzeug installiert ist.
+* **Kommandozeilenprogramme bekommen ein Terminal.** obah (TUI), XR HOTAS und adb schreiben auf die Konsole; ohne Fenster sähe man von ihnen nichts. Gesteuert über das neue tools.json-Feld `"terminal": true`.
+* **Gefunden wird der Befehl auch außerhalb des PATH:** `~/.local/bin` (AppImage) und `~/.cargo/bin` (Cargo) werden zuerst durchsucht, danach der PATH; gibt es nur eine Flatpak-Installation, wird `flatpak run <id>` genommen. Fehlt der Befehl ganz, kommt eine Meldung statt eines stillen Nichts.
+* **Gestartete Programme überleben die App** (eigene Sitzung) und laufen weiter, wenn yakuda-connect beendet wird.
+* **Neu: `core/tool_launcher.py`, `tests/test_tool_launcher.py`.**
+
+**Streaming-Tab: Grafikkarte auswählen**
+
+* **Neues Auswahlfeld „Grafikkarte“** unter dem Encoder. Bei zwei Grafikeinheiten (Prozessorgrafik + Steckkarte, Notebook mit Optimus/PRIME) landet WiVRn sonst gern auf der integrierten — hier wird festgelegt, welche benutzt wird.
+* **Erkannt wird über `/sys/class/drm`**, also ohne Zusatzpaket; ist `vulkaninfo` vorhanden, kommen Name und „dediziert/Prozessorgrafik“ von dort — dieselben Namen, die auch WiVRn sieht. Dedizierte Karten stehen oben.
+* **Gesetzt wird beim Start des Servers:** `MESA_VK_DEVICE_SELECT=vid:did!` (das Rufzeichen macht sie zur einzigen sichtbaren Karte), dazu `DRI_PRIME` und bei NVIDIA die PRIME-Offload-Variablen. Fehlt der Mesa-Layer (`vulkan-mesa-layers`), sagt das der Hinweis daneben — und es wird zusätzlich über `VK_DRIVER_FILES` der Treiber des falschen Herstellers ausgesperrt.
+* **WiVRn benutzt sie auch zum Kodieren:** beim vaapi-Encoder wird der Render-Knoten der gewählten Karte (`/dev/dri/renderD…`) als `device` in WiVRns `config.json` geschrieben — laut deren `docs/configuration.md` der vorgesehene Weg. nvenc und x264 kennen das Feld nicht und bekommen es auch nicht.
+* **Eine ausgebaute Karte verschwindet nicht still:** die Auswahl bleibt in der Liste stehen, daneben steht „nicht gefunden“, und gestartet wird automatisch.
+* **Neu: `core/gpu_select.py`, `tests/test_gpu_select.py`.** Gemerkt wird in `config.json` unter `gpu_device`.
+
+**Tests**
+
+* **Neu: `tests/test_cargo_installer.py`, `tests/test_controls_tab.py`, `tests/test_obah_bindings.py`, `tests/test_obah_editor.py`, `tests/test_obah_edit.py`, `tests/test_obah_aux.py`.** Beide Tools wurden zusätzlich einmal echt gebaut (Ubuntu 24.04). Der Ziehen-Test prüft ausdrücklich, dass sich nach dem Loslassen keine zwei Karten überlagern.
+
+#### 🇬🇧 English
+
+**New "Cargo" install method in the Tools tab**
+
+* **obah and XR HOTAS can now be installed from the app on any distribution.** Previously obah was AUR-only and XR HOTAS not installable at all — both cards only showed a hint to type by hand.
+* **Everything runs in a visible terminal.** The script checks, in order: C compiler, required system libraries, Rust/Cargo, then the build. Anything missing is installed (sudo password in the terminal).
+* **Rust is brought along if needed.** Arch and Fedora use the distribution package. On Ubuntu/Debian the apt Rust is too old (1.75; both tools need at least 1.85), so the script installs rustup for your user, no sudo.
+* **Errors stay visible.** On failure a red message appears and the terminal stays open until Enter is pressed. All output is also written to `install.log` in the tool folder; the card shows its path.
+* **Everything lives in its own folder:** `~/.config/yakuda-connect/tools/cargo/<tool>/`, built with `cargo install --root`. Without `--root` the binary ended up in `~/.cargo/bin` no matter which folder you are in. The start command is linked into `~/.local/bin`.
+* **Status, update and removal work like AppImages.** The card shows "Installed (Cargo)" with the version. obah is compared against crates.io, XR HOTAS against the latest commit in its GitHub repo. "Remove" deletes the folder and link without sudo; Rust itself stays installed.
+* **XR HOTAS: the OpenXR library is installed as well.** Without it the build fails at link time (`cannot find -lopenxr_loader`). Packages: `openxr` (Arch), `openxr-devel` (Fedora/openSUSE), `libopenxr-dev` (Ubuntu/Debian).
+* **A broken third-party repository no longer aborts the installation.** `apt-get update` may fail (e.g. because of an old PPA); installation proceeds anyway.
+* **New module `core/cargo_installer.py`**, new tools.json fields `crate`, `cargo_git` and `cargo_sys_deps`.
+
+**New "Controls" tab**
+
+* **New sidebar entry "Controls"** between Games and Settings, with two switches: "Stick control via XR HOTAS" (top) and "Controls via obah".
+* **Turning a switch on checks whether the tool is installed.** If it is, the switch stays on. If not, a dialog asks how to install it: one button per method available on this system (Cargo, yay, paru, …), each with a one-line explanation.
+* **Installation goes through the Tools tab**, not a separate path: same visible terminal, same error display, same card. The switch is locked while installing.
+* **Cancel or failure turns the switch off again** and says where to find the error message. If another installation is already running in the Tools tab, it waits instead of starting a second one.
+* **Removing the tool in the Tools tab turns the switch off.** The state is stored in `config.json` (`controls_xr_hotas`, `controls_obah`); after a restart "on" only counts if the tool is still there.
+* **"▶ Start"** opens the installed tool in a terminal. If it exits with an error, the window stays open.
+* **New: `core/tabs/controls_mixin.py`, `appimage_installer.installed_locally()`** (quick check without network). The Settings page index is now taken from `pages.indexOf(tab_settings)` instead of a hard-coded 5.
+* **New: `tests/test_controls_tab.py`.**
+
+**Controls tab: collapsible "Controls via obah" section**
+
+* **Three dropdowns for obah's three steps:** ① game, ② controller, ③ load bindings. The first time the tab is opened, the section expands and searches in the background; after that it can be collapsed and expanded.
+* **Preset on first open:** VRChat (if installed) · Oculus/Meta Touch · xrizer bindings. If there is no xrizer file for the selection, the first available entry is used. What you pick yourself stays when switching games; automatically forced choices (e.g. "Start from scratch" for a game without bindings) don't.
+* **① Game:** all installed Steam games with an OpenVR action file (`actions.json`, `action_manifest.json`, `vr_actions.json`, `steamvr_actions.json`), alphabetical — the same rules as obah. One deliberate difference: obah looks for the game folder by the game's name, but Steam stores it under `installdir`. When those differ (colons, suffixes like "Deluxe"), obah misses the game; here it shows up.
+* **② Controller:** obah's seven profiles with readable names (e.g. "Valve Index (Knuckles)") followed by which bindings already exist for the selected game (`✓ Default, xrizer` or "no bindings"). The first controller with bindings is preselected; a controller you picked yourself stays selected when switching games.
+* **③ Load bindings:** only the sources that exist, in obah's order — game default, xrizer, VapoR, OpenComposite — and always "Start from scratch". Below it, the file that would be loaded.
+* **Missing files are shown.** Some games reference bindings in their manifest that they don't ship; obah then silently starts empty. Here it says "⚠ File missing: …" instead.
+* **Checked against real obah:** game list and per-controller checkmarks match obah 0.1.1 (apart from the difference above).
+* **New: `core/obah_bindings.py`, `tests/test_obah_bindings.py`.**
+
+**Bindings view below the selection**
+
+* **Action sets as tabs**, named as in obah — for VRChat "Global (L/R)", "One Hand", "Menu", "Action Menu", "Drone (L/R)". If the game ships display names (`localization` in actions.json), those are used, preferring the app's language.
+* **Both controllers side by side, SteamVR-style:** one drawing per hand, a card per input on the outside ("Use as trigger · Pull → Run · Click → Use"), and a line from the card to the button. Bound inputs get a solid line, free ones a dashed line. Hovering highlights card, line and point; the tooltip shows full paths.
+* **Button positions come from obah's controller profiles** (`binding_image_point`), so the lines land where SteamVR puts them. The controller drawing is an original schematic — drawn for **all seven** controllers in the dropdown. The right hand is the mirrored left, as in SteamVR.
+* **Which inputs on which side, which rows per mode, how paths are matched** — all following obah's rules (`edit_bindings.rs`). Unknown inputs in the file are shown instead of dropped.
+* **Adapts to window width:** side by side, stacked when the window is narrow. The Controls tab now scrolls; title and subtitle stay put.
+* **Broken files** (invalid JSON, no action sets) show a readable message instead of an empty view.
+* **New: `core/obah_editor.py`, `ui/controller_view.py`, `tests/test_obah_editor.py`.**
+
+**Editing bindings (like obah)**
+
+* **Clicking a card opens the edit window**, laid out like obah's popup: the button's bindings on the left ("#1 Joystick · Move"), the selected binding on the right.
+* **Everything obah can do there:** add and remove bindings, pick the mode (only modes this button supports), pick an action per field (only actions of the action set with a matching type, or "none"), add parameters (known ones with a description such as deadzone or axis inversion, or custom ones), change and remove them. Values prefixed with `json:` are stored as JSON, as in obah.
+* **Nothing is silently lost:** unknown modes, fields and actions from the file are kept and selectable. Changing the mode only drops — as in obah — the fields the new mode doesn't have.
+* **"Apply" changes the layout in the tab, "Save" writes the file** — as xrizer, VapoR or OpenComposite binding (arrow on the button), to the same place obah uses. The default target is the loaded source, otherwise xrizer. **An existing file is backed up as `.bak` first** (obah overwrites without a backup). Writes are atomic.
+* **Unsaved changes are visible** (● in the status line) and aren't lost when switching game, controller or source: you're asked "Save or Discard". Plus a "Discard" button.
+* **Cards grow with their content:** add a binding and the card gets taller, the cards below move down.
+* **Cards and controllers can be moved:** drag a card to move it, drag the drawing to move the controller. A click without dragging still opens the window. The arrangement is remembered per controller and hand (`controls_layout.json`); "Reset layout" restores the automatic one. Lines start at the card edge facing their point.
+* **New: `ui/binding_dialog.py`, `tests/test_obah_edit.py`.**
+
+**Controls tab: polish, profiles, poses and chords**
+
+* **Dropdown lists now have a background.** Under KDE/Breeze a combo box's list is a window of its own and translucent — with the dark stylesheet only the text was left and the content behind it showed through. Translucency is switched off for these lists, and an event filter re-applies it whenever the style turns it back on while showing (new: `ui/opaque_combo.py`).
+* **Named profiles above the selection.** "Save as …" stores arrangement *and* bindings under a name of your own, "Load" brings them back, "Delete" removes them (`controls_profiles.json`). If a profile belongs to a different controller type, you're asked and only the arrangement is applied — a binding belongs to exactly one controller. A loaded binding counts as an unsaved change until you save.
+* **All controllers drawn:** Oculus/Meta Touch, Valve Index (Knuckles), Vive Wand, Vive Focus 3, hand tracking, gamepad and Oculus Rift CV1 — each with its own shape, buttons, trigger, grip and rings.
+* **Moving a controller moves only the controller.** The cards used to travel with it. The drawing now has an offset of its own; the cards stay where they are and only the lines follow.
+* **Cards snap instead of overlapping.** While dragging, a gap shows where the card will land; the card below moves down, and on release the gap closes with no overlap. Any order can be built and everything pushed back again. What's remembered is the order, not free coordinates — an old `controls_layout.json` is converted on load (sorted by height).
+* **Confirmation when closing.** Quitting the app with unsaved changes asks "Save / Discard / Cancel"; "Cancel" keeps the app open. Quitting via signal (Ctrl-C, logout) doesn't ask, since nobody is there to answer.
+* **Poses, haptics and skeleton** in a box of their own below the controllers — like obah's "Other" section: source and action per entry, plus one add row per kind when the action set has a matching action. The system input (`/input/system`) stays out, exactly as in obah.
+* **Chords (button combinations)** in the second box: several sources with their kind (held, single, click, touch) on one action. Sources can be added and removed, one always stays. Stored in obah's format (`["path", "held"]`).
+* **New: `ui/opaque_combo.py`, `tests/test_obah_aux.py`.**
+
+**README**
+
+* **Controls tab and Cargo method in "Key Features".**
+* **Privacy section completed.** New connections (crates.io, Cargo downloads, rustup), `sudo` for the Cargo method, new files and folders — including the line rustup writes into shell profiles if it has to install Rust, plus `controls_layout.json`, `controls_profiles.json` and what saving writes into the game folder (now `poses`, `skeleton`, `haptics` and `chords` as well).
+* **Subtle transparency note at the bottom** about development with AI assistants.
+
+**Tools tab**
+
+* **Fixed gap below the "Applications"/"OSC Apps" tabs.** When scrolling, cards ran right up to the bottom edge of the tabs, leaving a strip of the previous card visible. The 10 px gap is now part of the scroll area frame (`setViewportMargins`) and no longer scrolls with the content.
+
+**Controls tab: swappable controller images, centred controllers, less height**
+
+* **The controller drawings now live as PNGs in `assets/controls`** and can be swapped without touching code: `<controller>_left.png` / `<controller>_right.png`, or `<controller>.png` for gamepad and Rift. `.svg`, `.webp` and `.jpg` are read too. If a file is missing, the app draws the controller itself as before.
+* **Your own images can go into `~/.config/yakuda-connect/controls/`** — that folder takes precedence over `assets/controls` and survives updates. `scripts/render_controller_textures.py` regenerates the bundled images; they double as a template to paint over (keep the aspect ratio, otherwise the input dots sit next to the buttons).
+* **Left and right controller now sit at half the height of the box**, centred against the card column instead of at the top edge. A controller you dragged yourself stays where you put it.
+* **Collapsing really collapses everything.** Closing "Controls via obah" now also hides the action sets, both controllers and the boxes at the bottom. Nothing is unloaded: selection, edits and the unsaved state are exactly as you left them when you open it again.
+* **The bottom part (poses, haptics, chords) is its own collapsible section**, closed by default. That saves the height of two boxes; the lists are still filled, just not shown.
+
+**Controls tab: tidy view**
+
+* **New "Tidy view" button** next to "Reset arrangement": cards then show only the input name ("Joystick") instead of the whole binding. An arrow behind the type shows there is more; line and dot on the controller stay, and a click still opens the edit window.
+* **Right-click a card** to collapse or expand that one ("Show/hide bindings"), plus "Show all" and "Hide all". Right-clicking next to the cards offers only the two all-entries — that's the way back out of a fully collapsed controller.
+* **Button and cards keep each other in step:** hide the last card by hand and the button latches on by itself; bring one back and it pops out.
+* **Remembered per controller and hand** (`controls_layout.json`, field `compact`), so it is part of the named profiles too. "Reset arrangement" brings everything back.
+
+**Tools tab: launch programs directly**
+
+* **Every card now has "▶ Start"** — in the same row as the start command, so it is visible exactly when the tool is installed.
+* **Command-line tools get a terminal.** obah (a TUI), XR HOTAS and adb write to the console; without a window you would see nothing of them. Controlled by the new tools.json field `"terminal": true`.
+* **The command is found outside PATH too:** `~/.local/bin` (AppImage) and `~/.cargo/bin` (Cargo) are searched first, then PATH; with a Flatpak-only install, `flatpak run <id>` is used. If the command is gone entirely, you get a message instead of silence.
+* **Launched programs outlive the app** (own session) and keep running when yakuda-connect is closed.
+* **New: `core/tool_launcher.py`, `tests/test_tool_launcher.py`.**
+
+**Streaming tab: pick the graphics card**
+
+* **New "Graphics card" selector** below the encoder. With two graphics units (integrated + add-in card, laptop with Optimus/PRIME) WiVRn tends to land on the integrated one — this pins down which one is used.
+* **Detected via `/sys/class/drm`**, so no extra package needed; if `vulkaninfo` is present, name and "dedicated/integrated" come from there — the same names WiVRn sees. Dedicated cards are listed first.
+* **Applied when the server starts:** `MESA_VK_DEVICE_SELECT=vid:did!` (the exclamation mark makes it the only visible card), plus `DRI_PRIME` and, on NVIDIA, the PRIME offload variables. If the Mesa layer (`vulkan-mesa-layers`) is missing, the hint next to the selector says so — and `VK_DRIVER_FILES` additionally locks out the other vendor's driver.
+* **WiVRn encodes on it as well:** for the vaapi encoder the render node of the chosen card (`/dev/dri/renderD…`) is written as `device` into WiVRn's `config.json` — the documented way per their `docs/configuration.md`. nvenc and x264 don't know that field and don't get it.
+* **A removed card doesn't vanish silently:** the choice stays in the list, marked "not found", and the server starts automatically.
+* **New: `core/gpu_select.py`, `tests/test_gpu_select.py`.** Stored in `config.json` as `gpu_device`.
+
+**Tests**
+
+* **New: `tests/test_cargo_installer.py`, `tests/test_controls_tab.py`, `tests/test_obah_bindings.py`, `tests/test_obah_editor.py`, `tests/test_obah_edit.py`, `tests/test_obah_aux.py`.** Both tools were additionally built for real once (Ubuntu 24.04). The drag test explicitly checks that no two cards overlap after release.
+
+### 🚀 v1.3.0 — 2026-09-16
 
 #### 🇩🇪 Deutsch
 
@@ -131,7 +363,7 @@
 * **New: `tests/test_exit_guard.py` with 33 checks, `tests/test_release_notes.py`, `tests/test_steam_shortcuts.py` and `tests/test_compat_mapping.py`** (including a byte-exact round trip of `shortcuts.vdf`). The real watchdog against a real kill was tested manually with a dummy server, since an automated test would hit any real `wivrn-server` on a developer machine.
 * **`YAKUDA_NO_EXIT_GUARD=1`** disables the feature. It is set by `tests/conftest.py` and `tests/smoke.py`.
 
-### 🚀 v1.2.9
+### 🚀 v1.2.9 — 2026-09-16
 
 #### 🇩🇪 Deutsch
 
@@ -235,7 +467,7 @@
 * **The parser is checked against hand-built `appinfo.vdf` files** — in both format versions AND both shapes (with the `appinfo` wrapper node, as Steam writes it, and without). That wrapper is where detection failed completely during development: `common` was looked for one level too high, every game counted as "not VR", and no error surfaced because an empty value is a valid result. A hand-built fixture is only as good as your understanding of the format.
 * **Pinned down among others:** skipping unwanted apps lands on the right byte (getting that wrong yields random-looking hits, not nothing), categories 53/54/31 count and 52 does not, file detection really does add what Steam omits, the expensive walk doesn't run at all on a second scan, a removed game stays gone after a scan, a quiet scan leaves an expanded panel alone, and the scan button doesn't scan quietly.
 
-### 🚀 v1.2.8
+### 🚀 v1.2.8 — 2026-09-15
 
 #### 🇩🇪 Deutsch
 
@@ -367,7 +599,7 @@
 * **Docstring fix in `usb_headsets.py`:** it said `adb forward`. The correct direction is `reverse` — the headset opens `localhost:9757`, so the tunnel has to point at the PC.
 * **New test file `tests/test_wivrn_apk.py`** with 15 tests, no network and no headset: release selection by server version, flagging of the fallback, patch numbers not breaking compatibility, rejection of error pages, cancellation without leftovers, package detection including the store build taking precedence, and a test that pins down `reverse` being called rather than `forward`.
 
-### 🚀 v1.2.7
+### 🚀 v1.2.7 — 2026-09-14
 
 #### 🇩🇪 Deutsch
 
@@ -448,7 +680,7 @@
 
 * **`tests/test_autotune.py` was blind on developer machines.** The fixture redirected `HOME`, but `vr_environment` also searches absolute system paths: `WIVRN_OVR_SEARCH_PATH` starts with `/opt/xrizer`, `EXTRA_OVR_PATHS` contains `/usr/lib64/xrizer`, and `find_wivrn_manifest()` finds `/usr/share/openxr/1/openxr_wivrn.json` — or falls back to exactly that when nothing matches. Anyone with xrizer and WiVRn installed therefore got four red tests: `no_xrizer` became `already_xrizer`, and the switch pointed at `/opt/xrizer` instead of the test HOME. The tests were not wrong, they were only meaningful on a clean machine — blind precisely where development happens. The fixture now shuts out all three sources; the search is confined to the test HOME. Verified with and without a system-wide VR install: 407 tests, green both times.
 
-### 🚀 v1.2.6
+### 🚀 v1.2.6 — 2026-08-28
 
 #### 🇬🇧 English
 
@@ -472,7 +704,7 @@
 * **Beim ersten Bild geht die Kartendeckkraft auf 85 %.** Bei 100 % zeigt nur der schmale Rand um die Karten das Bild, was zuverlässig auf die Frage „warum passiert nichts?" hinausläuft. OSC-DreamChatbox startet aus demselben Grund bei 82 %. Der Regler bleibt frei — wer ihn auf 100 % zurückzieht, behält das auch.
 * Ohne Hintergrundbild ändert sich nichts. Jede Ansicht wurde durch Rendern der laufenden Anwendung geprüft, nicht durch Lesen des Codes.
 
-### 🚀 v1.2.5
+### 🚀 v1.2.5 — 2026-08-28
 
 #### 🇬🇧 English
 
@@ -492,7 +724,7 @@
 * **Die Fläche darüber wird nur durchsichtig, wenn ein Bild gesetzt ist.** Ohne Bild sieht alles exakt aus wie vorher. Mit Bild lässt der Seitenstapel es durch; die Karten bleiben deckend, bis man den Deckkraft-Regler herunterzieht — so bleibt der Text in jedem Fall lesbar.
 * **„Kein Bild" wirkt wieder.** Das Entfernen des Hintergrunds ließ bisher das alte Stylesheet bis zum nächsten Neustart stehen.
 
-### 🚀 v1.2.4
+### 🚀 v1.2.4 — 2026-08-25
 
 #### 🇬🇧 English
 
@@ -522,7 +754,7 @@
 * **Das WiVRn-Dashboard wird auch hier nicht angeboten**, aus demselben Grund wie auf Fedora: zweite Oberfläche auf derselben Konfiguration und demselben Dienst, neben yakuda-connect überflüssig. `wivrn-dashboard` würde `wivrn-server` ohnehin mitziehen; den Server direkt zu installieren reicht.
 * **Paketstatus und Nachkontrolle für apt.** Installierte Pakete kommen aus `dpkg-query` (nur wirklich `installed` — ein entferntes Paket mit verbliebener Konfiguration zählt nicht mehr mit), Updates aus `apt list --upgradable`. Nach einem Durchlauf wird jedes angeforderte Paket erneut geprüft; was fehlt, steht namentlich da — meist heißt das, dass die PPA für diese Ubuntu-Version nicht baut.
 
-### 🚀 v1.2.3
+### 🚀 v1.2.3 — 2026-08-25
 
 #### 🇬🇧 English
 
@@ -588,7 +820,7 @@
   3. **Qt startete nicht: „Could not load the Qt platform plugin 'xcb'".** Das PySide6-Wheel bringt Qt mit, aber nicht die X11-Bibliotheken des Systems — und auf Ubuntu 24.04 (Basis von Mint 22.x) fehlt in der Standardinstallation genau eine davon, `libxcb-cursor0`. Ein Distro-Paket hätte sie als Abhängigkeit mitgezogen, pip kann das nicht wissen. Beim pip-Weg installiert das Skript die nötigen X11-Bibliotheken jetzt mit und prüft danach mit `ldd`, ob dem Plugin noch etwas fehlt. Fehlt weiterhin etwas, steht der Paketname im Klartext da statt eines „Speicherabzug geschrieben" ohne Erklärung.
 * **`install.sh` läuft auch außerhalb von Arch** — das Skript rief `sudo pacman -S git` auf, ohne vorher zu prüfen, ob es pacman überhaupt gibt; auf Fedora endete es deshalb mit „pacman: command not found". Der Paketmanager wird jetzt erkannt (pacman/dnf/apt/zypper), PySide6 kommt aus dem passenden Distributionspaket, und gibt es keines, baut der Installer ein eigenes venv — das fasst weder das System-Python noch PEP 668 an. Der Start-Wrapper nutzt jetzt `python3` statt `python`: Fedora hat `/usr/bin/python` nur mit installiertem `python-unversioned-command`, die App wäre also direkt nach erfolgreicher Installation nicht gestartet.
 
-### 🚀 v1.2.1
+### 🚀 v1.2.1 — 2026-08-23
 
 #### 🇬🇧 English
 
@@ -612,7 +844,7 @@
 * **Versions-Anker in `core/main.py` repariert** — der Kommentar über dem Anker nannte das gesuchte Muster ausgeschrieben und war damit selbst der erste Treffer in der Datei. Weil `bump_version.py`, der Smoke-Test und der Update-Checker bereits installierter Clients allesamt nur den ersten Treffer auswerten, wurde bei jedem Release der *Kommentar* hochgezählt, während die echte Zeile auf v1.1.4 stehen blieb. Gutgegangen ist das nur, weil der Kommentar zufällig die richtige Nummer trug. Der Kommentar ist jetzt umformuliert, sodass die echte Zeile der einzige Treffer ist, und der Smoke-Test schlägt fehl, sobald das Muster mehr als einmal vorkommt.
 * **Info-Tooltips wieder anklickbar** (gemeldet von sebastin25) — Tooltips mit Links, etwa die Quelle des WayVR-Designs, schlossen sich, sobald die Maus sich in Richtung Link bewegte; der Link war also sichtbar, aber nicht erreichbar. Ein Klick auf das (ⓘ) öffnet jetzt ein kleines Fenster, das stehen bleibt, bis man daneben klickt oder Esc drückt — mit funktionierenden Links. Beim bloßen Überfahren erscheint weiterhin der gewohnte Tooltip.
 
-### 🚀 v1.2.0
+### 🚀 v1.2.0 — 2026-08-22
 
 **Highlights:** Spenden laufen ab sofort über **Ko-fi** statt PayPal — im Programm unter Settings → „Community & Updates", im README und über den Sponsor-Knopf auf GitHub.
 
@@ -628,7 +860,7 @@
 * **Geändert** | **Die README-Badges zeigen auf Ko-fi**: sowohl das Badge ganz oben als auch die Support-Kachel im Community-Bereich wurden umgestellt. Das Versions-Badge, das mehrere Releases lang auf v1.1.1 stehen geblieben war, stimmt jetzt wieder mit der tatsächlichen Version überein.
 * **Neu** | **`.github/FUNDING.yml`**: GitHub blendet damit auf der Repo-Seite einen „Sponsor"-Knopf ein, der auf Ko-fi zeigt — der Link ist also sichtbar, ohne dass man erst ins README scrollen muss.
 
-### 🚀 v1.1.9
+### 🚀 v1.1.9 — 2026-08-20
 
 **Highlights:** Der VRChat-Bereich bekommt **drei Fix-Knöpfe statt einem** — Picture Fix, Videoplayer Fix und einen **Videoplayer Check**, der selbst nachsieht, woran das Abspielen scheitert, und einen **Knopf im Dashboard, der VRCVideoCacher startet** · dazu **Config-Backup und -Restore für jedes Spiel** vor einem Proton-Wechsel.
 
@@ -684,7 +916,7 @@
 * **Neu** | **Schalter `PROTON_LOG=1` für VRChat**: schreibt ein ausführliches Proton-Log nach `~/steam-438100.log` — die einzige Stelle, an der sichtbar wird, *woran* ein Videoplayer scheitert (mfplat, GStreamer, Codec). Standardmäßig aus, weil das Log schnell groß wird. Es ist eine Umgebungsvariable und steht deshalb vor `%command%`.
 * **Behoben** | **Die Diagnose gibt die aufgelöste Video-URL nie vollständig aus**: in ihren Parametern stecken die öffentliche IP des Nutzers und signierte Tokens. Angezeigt werden nur Host, `itag` und Client — Diagnose-Ausgaben landen erfahrungsgemäß unverändert in Discord.
 
-### 🚀 v1.1.8
+### 🚀 v1.1.8 — 2026-08-18
 
 **Highlights:** Die **Runtime-Umschaltung räumt jetzt hinter sich auf** — SteamVR schaltet WiVRns OpenVR-Kompatibilität ab, WiVRn bietet sie wieder an · und eine **einmalige Automatik** legt das Erst-Backup an und stellt danach auf **xrizer** um, sobald erkennbar ist, dass auf diesem Rechner schon einmal VR lief.
 
@@ -710,7 +942,7 @@
 * **Neu** | **Der Steam-Fix fragt, bevor er SteamVR überschreibt**: Der Fix schreibt immer WiVRn als aktive Runtime. Ein Klick darauf machte eine bewusst gewählte SteamVR-Einstellung stillschweigend rückgängig — jetzt sagt er das und fragt vorher. Ist SteamVR (oder WiVRn) gar nicht installiert, meldet die Umschaltung das, statt einen Pfad auf etwas Nichtvorhandenes zu schreiben.
 * **Intern** | Neue `core/vr_autotune.py` (ohne Qt, dadurch testbar) enthält die Einmal-Logik und das Gedächtnis der Runtime-Umschaltung; 14 neue Unit-Tests in `tests/test_autotune.py` nageln genau die Fälle fest, die wehtun würden: frisches System, zweiter Durchlauf nach manueller Änderung, abgeschalteter Zustand, laufender Server. `tests/test_runtime_switch.py` kommt mit 11 weiteren dazu, die die Regel hinter dem Fix oben festhalten: Pfad einer Bibliothek, nie der eines Manifests.
 
-### 🚀 v1.1.7
+### 🚀 v1.1.7 — 2026-08-15
 
 **Highlights:** Ein Abgleich mit WiVRn. Die **OpenVR-Auswahl arbeitet jetzt wie WiVRns eigenes Dashboard** — wählbar ist, was wirklich installiert ist · drei Einstellungen, die WiVRn nie gelesen hat, sind repariert bzw. entfernt (**refresh_rate**, **encoder-Schlüssel**) · der **USB-Zustand steht direkt bei den gekoppelten Headsets** („· USB" hinter dem Eintrag) · **Meta-Store-Link** für Quest-Nutzer unter dem APK-Installer.
 
@@ -739,7 +971,7 @@
 * **Neu** | **Meta-Store-Link unter dem APK-Installer**: Der Weg über adb setzt USB-Debugging und einen Entwickler-Account voraus. Quest-Nutzer bekommen WiVRn stattdessen direkt im Meta Horizon Store — der Link steht unter dem Installations-Knopf.
 * **Intern** | Neue `core/usb_headsets.py` (ohne Qt, dadurch testbar) für die USB-Erkennung und die Raten-Profile je Modell; der Scan läuft in einem eigenen Thread, damit ein langsames `adb` das Fenster nicht einfriert. 42 neue Unit-Tests in `tests/test_openvr_usb.py`, darunter einer, der WiVRns Suchpfad-Liste festnagelt, damit ein stilles Auseinanderlaufen auffällt.
 
-### 🚀 v1.1.6
+### 🚀 v1.1.6 — 2026-08-14
 
 #### 🇬🇧 English
 
@@ -775,7 +1007,7 @@
 * **Entfernt** | **Hand-Tracking- und Full-Body-Tracking-Haken im Dashboard**: Beides muss im Headset selbst aktiviert werden; der Haken in der App bewirkte nichts, erweckte aber den Eindruck, es sei damit getan. `hand_tracking` wird zudem nicht mehr in WiVRns `config.json` geschrieben — eine Option, die nur in WiVRn gesetzt werden kann, sollte von hier aus nicht überschrieben werden. Bestehende Konfigurationswerte bleiben unangetastet.
 * **Intern** | Die Firewall-Logik liegt jetzt in einer eigenen `core/firewall.py` (ohne Qt, dadurch testbar) mit 10 Unit-Tests, darunter der Fedora-Fall „firewalld aktiv, ufw ebenfalls installiert". Die OpenXR-/VR-Prioritäts-Box wurde zu `ui/vr_runtime_widget.py`, nach dem Vorbild der vorhandenen `queryfix_widget.py`.
 
-### 🚀 v1.1.5
+### 🚀 v1.1.5 — 2026-08-14
 
 #### 🇬🇧 English
 
@@ -817,7 +1049,7 @@
 * **Geändert** | **Übersetzungen liegen jetzt in `locales/en.json` und `locales/de.json`**: Die Texte der Oberfläche stecken nicht mehr in einer Python-Datei. Eine Sprache beizutragen heißt jetzt: `en.json` kopieren, die Werte übersetzen, Pull Request — ohne Python-Kenntnisse, und ein Tippfehler kann die App nicht mehr am Starten hindern. Fehlende Einträge fallen automatisch auf Englisch zurück.
 * **Intern** | `core/main.py` von rund 3.600 auf etwa 2.100 Zeilen verkleinert, Games- und Tools-Tab nach `core/tabs/` ausgelagert. Automatische Tests ergänzt (Smoke-Test von 5 auf 11 Prüfungen, dazu 16 Unit-Tests) und CI eingerichtet, damit solche Fehler vor einem Release auffallen statt beim Nutzer.
 
-### 🚀 v1.1.4
+### 🚀 v1.1.4 — 2026-08-06
 
 #### 🇬🇧 English
 
@@ -841,7 +1073,7 @@
 * **Behoben** | **Bitness wird jetzt überall geprüft**: Die Bibliothekssuche prüft die ELF-Klasse (32/64 Bit), statt nur "Datei existiert". Die Suchreihenfolge stellt `/usr/lib64` nach vorn, damit Fedora/openSUSE korrekt auflösen, und für `*.i686.json`-Manifeste kam ein eigener 32-Bit-Resolver dazu. Vorher konnte der Steam-Fix einen Pfad mit falscher Architektur aus einem defekten System-Manifest direkt in deine `active_runtime.json` übernehmen.
 * **Hinweis** | Backups aus der Zeit vor v1.1.4 haben keine `backup_meta.json`. Sie stellen weiterhin deine Benutzer-Configs wieder her; System-Ordner werden sicherheitshalber übersprungen. Einmal ein frisches Backup anlegen, dann funktioniert die vollständige Wiederherstellung auf dem eigenen Rechner wieder.
 
-### 🚀 v1.1.3
+### 🚀 v1.1.3 — 2026-07-25
 
 #### 🇬🇧 English
 
@@ -876,7 +1108,7 @@
 * **Hinweis** | Proton-Beschreibungen in `games.json` dürfen ein einfacher String sein (für beide Sprachen) oder ein `{ "de": …, "en": … }`-Objekt; die mitgelieferte Datenbank nutzt zweisprachige Objekte, damit Englisch erhalten bleibt.
 
 
-### 🚀 v1.1.2
+### 🚀 v1.1.2 — 2026-07-22
 
 #### 🇬🇧 English
 
@@ -900,7 +1132,7 @@
 * **Neu** | **Mikrofon / Audio-Quelle (Einstellungen)**: Seit **Proton 11** werden virtuelle Mikrofone nicht mehr sauber an Spiele durchgereicht. Wer Ton über ein virtuelles Mikrofon an VRChat gibt (z. B. per **PipeWeaver**, um Spotify / YouTube Music ins Spiel zu schicken), kann jetzt die Aufnahmequelle per Dropdown wählen und als System-Standard setzen. Intern per `pactl list sources short` (Liste) und `pactl set-default-source` (setzen). Ein **Zurücksetzen**-Knopf stellt die vor der ersten Änderung aktive Quelle wieder her (gemerkt in `~/.config/yakuda-connect/config/mic_state.json`), ein **Aktualisieren**-Knopf liest die Quellen neu ein. Die aktive Standard-Quelle ist in der Liste mit ● markiert. Fehlt `pactl`, deaktiviert sich der Bereich mit Hinweis.
 * **Neu** | **OSC-DreamChatbox im Tools-Tab**: Die **native Linux-Alternative zu MagicChatbox (VRCOSC)** — ein VRChat-OSC-Chatbox-Begleiter mit Status-Rotation, Now-Playing, Hardware-Monitor, Speech-to-Text und OSCQuery. Installation als **AppImage** (aus dem [GitHub-Release](https://github.com/yakuda-stack/OSC-DreamChatbox)) oder über das **AUR** ([osc-dreamchatbox](https://aur.archlinux.org/packages/osc-dreamchatbox)). Die Karte ist mit Akzent-Rahmen und ★-Badge **hervorgehoben**, da sie vom Entwickler dieser App stammt.
 
-### 🚀 v1.1.1
+### 🚀 v1.1.1 — 2026-07-20
 
 #### 🇬🇧 English
 
@@ -938,7 +1170,7 @@
 
 ---
 
-### 🚀 v1.1.0
+### 🚀 v1.1.0 — 2026-07-09
 
 #### 🇬🇧 English
 
@@ -958,7 +1190,7 @@
 
 ---
 
-### 🚀 v1.0.9-alpha
+### 🚀 v1.0.9-alpha — 2026-07-09
 
 #### 🇬🇧 English
 * **Added** | New **Games** tab: scans all your Steam libraries (native, Flatpak and extra library folders) and shows every detected VR game as a compact cover tile — using the vertical artwork straight from your local Steam cache, no downloads needed. Results are saved to the config, so Steam is only re-scanned when you hit the "Scan games" button (the first visit scans automatically).
@@ -994,7 +1226,7 @@
 
 ---
 
-### 🚀 v1.0.8-alpha
+### 🚀 v1.0.8-alpha — 2026-07-05
 
 #### 🇬🇧 English
 * **Changed** | The version number now lives in exactly one place — `APP_VERSION` in `core/main.py`. The dashboard label, the "Current version" line in Settings and the update check all read from it, so a release only needs that single edit.
@@ -1006,7 +1238,7 @@
 
 ---
 
-### 🚀 v1.0.7-alpha
+### 🚀 v1.0.7-alpha — 2026-07-05
 
 #### 🇬🇧 English
 * **Added** | New app icon (SVG): a VR headset with streaming waves in the app's Nord color scheme — scales crisply at every size and is now used everywhere (window, menu entry, AppImage).
@@ -1030,7 +1262,7 @@
 
 ---
 
-### 🚀 v1.0.6-alpha
+### 🚀 v1.0.6-alpha — 2026-07-03
 
 #### 🇬🇧 English
 * **Added** | Updater in dashboard automatic update in yakuda connect
@@ -1040,7 +1272,7 @@
 
 ---
 
-### 🚀 v1.0.5-alpha
+### 🚀 v1.0.5-alpha — 2026-06-30
 
 #### 🇬🇧 English
 * **Added** | Multi-method installation: WiVRn and companion tools can now be installed via AUR (yay/paru), Flatpak or AppImage, selectable per item from a dropdown — with automatic detection of what's available on your distribution.
@@ -1078,7 +1310,7 @@
 * **Behoben** | Der VRChat-Bilder-Symlink und die Start-Sperre setzen kein natives Arch-/Steam-Setup mehr voraus; sie funktionieren jetzt mit Flatpak-Steam und Nicht-Arch-Systemen.
 * **Entfernt** | Nix als eigenständige Installationsmethode (zu viel Wartung und Pfad-Komplexität) — NixOS wird jetzt wie Ubuntu/Fedora behandelt und nutzt Flatpak/AppImage (Flatpak, ungetestet auf Hardware).
 
-### 🚀 v1.0.4-alpha
+### 🚀 v1.0.4-alpha — 2026-06-27
 
 #### 🇬🇧 English
 * **Fixed** | Fixed symlink generation for the VRChat picture folder.
@@ -1096,7 +1328,7 @@
 
 ---
 
-### 🚀 v1.0.3-alpha
+### 🚀 v1.0.3-alpha — 2026-06-22
 
 #### 🇬🇧 English
 * **Added** | VR Priority (Streaming Tab): Added an option to enable VR priority (`CAP_SYS_NICE` / Async Reprojection), giving the VR process higher scheduler priority for smoother streaming.
@@ -1110,7 +1342,7 @@
 
 ---
 
-### 🚀 v1.0.2-alpha
+### 🚀 v1.0.2-alpha — 2026-06-17
 
 #### 🇬🇧 English
 * **Added** | Connect-driven autostart functionality when the headset links up.

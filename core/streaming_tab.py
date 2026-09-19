@@ -54,6 +54,7 @@ class StreamingTab(QWidget):
         encoder_val = data.get("encoder", "Auto")
         codec_val = data.get("codec", "Automatic")
         bitrate_val = data.get("bitrate", 100)
+        gpu_val = data.get("gpu_device", "") or ""
 
         # UI-Elemente auf die gespeicherten Werte setzen.
         # Die WAHRHEIT ist WiVRns config.json, nicht unsere: der Nutzer kann
@@ -81,6 +82,10 @@ class StreamingTab(QWidget):
 
         self.slider_bitrate.setValue(int(bitrate_val))
         self.update_bitrate_label(int(bitrate_val))
+
+        # Grafikkarte: die Liste kommt frisch vom System, ausgewaehlt wird
+        # die gemerkte Kennung (fehlt die Karte, sagt es der Hinweis).
+        self.reload_gpu_options(select=gpu_val)
 
         # Signale wieder freigeben
         self.combo_openvr.blockSignals(False)
@@ -214,6 +219,39 @@ class StreamingTab(QWidget):
         self.combo_encoder.currentTextChanged.connect(self._update_encoder_hint)
         self._update_encoder_hint(self.combo_encoder.currentText())
 
+        # --- Grafikkarte -------------------------------------------------
+        # Auf Rechnern mit zwei Grafikeinheiten (Prozessorgrafik + Karte,
+        # Notebook mit Optimus/PRIME) sucht sich Vulkan selbst eine aus —
+        # oft die falsche. Hier wird sie festgelegt; die Variablen setzt die
+        # App beim Start des WiVRn-Servers (siehe core/gpu_select.py).
+        gpu_row = QWidget()
+        gpu_row_layout = QHBoxLayout(gpu_row)
+        gpu_row_layout.setContentsMargins(0, 0, 0, 0)
+        gpu_row_layout.setSpacing(10)
+        self.combo_gpu = QComboBox()
+        self.combo_gpu.setMinimumWidth(260)
+        gpu_row_layout.addWidget(self.combo_gpu)
+
+        self.btn_gpu_rescan = QPushButton("⟳")
+        self.btn_gpu_rescan.setToolTip(tr("streaming_gpu_rescan_tip"))
+        self.btn_gpu_rescan.setFixedWidth(34)
+        self.btn_gpu_rescan.setCursor(Qt.PointingHandCursor)
+        self.btn_gpu_rescan.setStyleSheet(
+            "QPushButton { background-color:#434c5e; color:#eceff4; border:none;"
+            " font-weight:bold; border-radius:4px; padding:4px; }"
+            " QPushButton:hover { background-color:#5e81ac; }")
+        self.btn_gpu_rescan.clicked.connect(lambda: self.reload_gpu_options())
+        gpu_row_layout.addWidget(self.btn_gpu_rescan)
+
+        self.lbl_gpu_hint = QLabel("")
+        self.lbl_gpu_hint.setWordWrap(True)
+        self.lbl_gpu_hint.setStyleSheet("color:#7b88a1; font-size:11px;")
+        gpu_row_layout.addWidget(self.lbl_gpu_hint, 1)
+
+        self.lbl_gpu = QLabel(tr("streaming_gpu"))
+        encoder_form.addRow(self.lbl_gpu, gpu_row)
+        self.reload_gpu_options()
+
         # Codec-Zeile (versteckt) — zum Einblenden: self.row_codec.setVisible(True)
         self.row_codec = QWidget()
         row_codec_layout = QHBoxLayout(self.row_codec)
@@ -280,6 +318,7 @@ class StreamingTab(QWidget):
         self.slider_res.sliderReleased.connect(self.trigger_auto_save)
         self.slider_fov.sliderReleased.connect(self.trigger_auto_save)
         self.combo_encoder.activated.connect(self.trigger_auto_save)
+        self.combo_gpu.activated.connect(self._on_gpu_picked)
         self.combo_codec.activated.connect(self.trigger_auto_save)
         self.slider_bitrate.sliderReleased.connect(self.trigger_auto_save)
 
@@ -299,6 +338,9 @@ class StreamingTab(QWidget):
         # Erklaerung neben der Auswahl UND die Tooltips der Eintraege
         self._apply_encoder_hints()
         self._update_encoder_hint(self.combo_encoder.currentText())
+        self.lbl_gpu.setText(tr("streaming_gpu"))
+        self.btn_gpu_rescan.setToolTip(tr("streaming_gpu_rescan_tip"))
+        self.reload_gpu_options()
         self.lbl_codec.setText(tr("streaming_codec"))
         self.lbl_bitrate.setText(tr("streaming_bitrate"))
         self.lbl_moved_hint.setText(tr("streaming_moved_hint"))
@@ -323,6 +365,72 @@ class StreamingTab(QWidget):
         "Vulkan": "streaming_enc_vulkan",
         "x264":   "streaming_enc_x264",
     }
+
+    # ------------------------------------------------------------------ #
+    #  Grafikkarte
+    # ------------------------------------------------------------------ #
+    def _gpu_kind_names(self):
+        return {"discrete": tr("streaming_gpu_discrete"),
+                "integrated": tr("streaming_gpu_integrated"),
+                "cpu": tr("streaming_gpu_software")}
+
+    def reload_gpu_options(self, select=None):
+        """
+        Liste neu aufbauen. ``select`` ist die gemerkte Kennung; fehlt sie,
+        bleibt die bisherige Auswahl stehen.
+
+        Eine Karte, die es nicht mehr gibt (ausgebaut, anderer Rechner),
+        verschwindet nicht stillschweigend: sie steht weiter in der Liste
+        und der Hinweis daneben sagt, dass sie fehlt. Sonst waere die
+        Auswahl beim naechsten Speichern still auf "Automatisch" zurueck.
+        """
+        import gpu_select
+
+        if select is None:
+            select = self.current_gpu_id()
+        self.combo_gpu.blockSignals(True)
+        self.combo_gpu.clear()
+        self.combo_gpu.addItem(tr("streaming_gpu_auto"), gpu_select.AUTO)
+        self._gpus = gpu_select.list_gpus()
+        kinds = self._gpu_kind_names()
+        for gpu in self._gpus:
+            self.combo_gpu.addItem(gpu_select.label_for(gpu, kinds), gpu["id"])
+            self.combo_gpu.setItemData(self.combo_gpu.count() - 1,
+                                       gpu.get("pci", ""), Qt.ToolTipRole)
+        index = self.combo_gpu.findData(select) if select else 0
+        if select and index < 0:
+            self.combo_gpu.addItem(tr("streaming_gpu_missing").format(id=select), select)
+            index = self.combo_gpu.count() - 1
+        self.combo_gpu.setCurrentIndex(max(index, 0))
+        self.combo_gpu.blockSignals(False)
+        self._update_gpu_hint()
+
+    def current_gpu_id(self):
+        """Gemerkte Kennung der Karte ('1002:73df') oder "" fuer automatisch."""
+        if not hasattr(self, "combo_gpu"):
+            return ""
+        return self.combo_gpu.currentData() or ""
+
+    def _on_gpu_picked(self, _index):
+        self._update_gpu_hint()
+        self.trigger_auto_save()
+
+    def _update_gpu_hint(self):
+        """Text neben der Auswahl: fehlende Karte, fehlender Mesa-Layer."""
+        import gpu_select
+
+        gpu_id = self.current_gpu_id()
+        if not gpu_id:
+            self.lbl_gpu_hint.setText(tr("streaming_gpu_auto_hint"))
+            return
+        gpu = gpu_select.find_gpu(gpu_id, getattr(self, "_gpus", None))
+        if gpu is None:
+            self.lbl_gpu_hint.setText("⚠ " + tr("streaming_gpu_gone"))
+            return
+        if not gpu_select.device_select_layer_available():
+            self.lbl_gpu_hint.setText("⚠ " + tr("streaming_gpu_no_layer"))
+            return
+        self.lbl_gpu_hint.setText(tr("streaming_gpu_set"))
 
     def _apply_encoder_hints(self):
         """Jedem Listeneintrag seinen Erklaertext als Tooltip geben."""
@@ -550,7 +658,8 @@ class StreamingTab(QWidget):
             "foveated_encoding": self.slider_fov.value(),
             "encoder": self.combo_encoder.currentText(),
             "codec": self.combo_codec.currentText(),
-            "bitrate": self.slider_bitrate.value()
+            "bitrate": self.slider_bitrate.value(),
+            "gpu_device": self.current_gpu_id(),
         }
 
         # Hand-/Full-Body-Tracking haben keine Schalter mehr im Dashboard —

@@ -335,7 +335,7 @@ def supported_methods(tool):
 
     Eine LEERE Liste ist eine Aussage ("dieses Tool ist von hier aus nicht
     installierbar") und keine fehlende Angabe. Deshalb 'in tool' statt
-    'if m:' — sonst landen Tools wie XR HOTAS (nur ueber cargo) oder VIVE
+    'if m:' — sonst landen Tools wie VIVE
     Hub (nur als Tarball von HTC) in der AUR-Rueckfallzeile und bekaemen
     einen Install-Knopf, der 'yay -S <paket>' auf ein nicht existierendes
     Paket loslaesst. Solche Tools zeigen nur ihren note-Hinweis.
@@ -360,6 +360,10 @@ def detect_install_methods(tool):
         methods.append("appimage")
     if "aur" in supported and tool.get("pkg"):
         methods.extend(available_aur_helpers())   # yay vor paru
+    if "cargo" in supported:
+        # Distro-unabhaengig: fehlendes Rust/Cargo zieht das Installations-
+        # skript selbst nach (siehe core/cargo_installer.py).
+        methods.append("cargo")
     if "rpm" in supported and tool.get("github_repo") and dnf_available():
         # Nur auf Systemen mit dnf anbieten — ein RPM auf Arch waere sinnlos.
         methods.append("rpm")
@@ -591,6 +595,7 @@ def compute_status(tool):
         "appimage_installed": False, "appimage_version": "", "appimage_has_update": False,
         "pm_installed": False, "pm_helper": "", "pm_version": "", "pm_has_update": False,
         "flatpak_installed": False, "flatpak_version": "",
+        "cargo_installed": False, "cargo_version": "", "cargo_has_update": False,
         "config_present": False,
     }
     supported = supported_methods(tool)
@@ -618,8 +623,44 @@ def compute_status(tool):
         st["flatpak_installed"] = ok
         st["flatpak_version"] = ver
 
+    if "cargo" in supported:
+        import cargo_installer   # spaet importiert: cargo_installer importiert dieses Modul
+        inst, ver = cargo_installer.local_status(tool)
+        st["cargo_installed"] = inst
+        st["cargo_version"] = ver
+        if inst:
+            st["cargo_has_update"] = cargo_installer.update_available(tool)
+
     st["config_present"] = native_installed(tool)
     return st
+
+
+def installed_locally(tool):
+    """
+    Ist das Tool auf irgendeinem Weg installiert? Rein lokal, ohne Netz —
+    fuer schnelle Pruefungen (Controls-Tab), nicht fuer den Update-Check.
+
+    Reihenfolge: eigener Cargo-Ordner, eigene AppImage, Flatpak,
+    yay/paru-Paket und zuletzt der Startbefehl im PATH (deckt auch ein von
+    Hand per 'cargo install' nach ~/.cargo/bin gebautes Tool ab).
+    """
+    supported = supported_methods(tool)
+    if "cargo" in supported:
+        import cargo_installer
+        if cargo_installer.local_status(tool)[0]:
+            return True
+    if (tool.get("github_repo") or tool.get("appimage_url")) and local_status(tool)[0]:
+        return True
+    if tool.get("flatpak_id") and flatpak_query(tool)[0]:
+        return True
+    if "aur" in supported and tool.get("pkg"):
+        for h in available_aur_helpers():
+            if pm_query(tool, h)[0]:
+                return True
+    cmd = tool.get("start_cmd")
+    if cmd and (shutil.which(cmd) or os.access(os.path.join(HOME, ".cargo", "bin", cmd), os.X_OK)):
+        return True
+    return False
 
 
 # --------------------------------------------------------------------------- #

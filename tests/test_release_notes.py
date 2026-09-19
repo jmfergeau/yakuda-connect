@@ -141,6 +141,31 @@ def test_anzeige_der_echten_dateien(name, lang, other):
     assert other not in out
 
 
+def test_jede_version_hat_ein_datum():
+    """
+    Jede Ueberschrift traegt ihr Veroeffentlichungsdatum (ISO, hinter der
+    Version). Die Daten stammen aus den Git-Tags bzw. den GitHub-Releases;
+    beim Anlegen einer neuen Version wird das gern vergessen.
+    """
+    for name in (release_notes.CHANGELOG, release_notes.HIGHLIGHTS):
+        for line in _read(name).splitlines():
+            if line.startswith("### "):
+                assert re.search(r" — \d{4}-\d{2}-\d{2}$", line), f"{name}: {line}"
+
+
+def test_changelog_und_highlights_nennen_dasselbe_datum():
+    def dates(name):
+        return {m.group(1): m.group(2) for m in
+                re.finditer(r"^###\s.*?\bv?(\d+\.\d+\.\d+).*? — (\d{4}-\d{2}-\d{2})$",
+                            _read(name), re.M)}
+    changelog, highlights = dates(release_notes.CHANGELOG), dates(release_notes.HIGHLIGHTS)
+    shared = set(changelog) & set(highlights)
+    assert shared
+    abweichend = {v: (changelog[v], highlights[v]) for v in shared
+                  if changelog[v] != highlights[v]}
+    assert not abweichend, abweichend
+
+
 def test_highlights_ohne_relative_links():
     # QTextBrowser wuerde einen relativen Link intern "oeffnen" und eine leere
     # Seite zeigen.

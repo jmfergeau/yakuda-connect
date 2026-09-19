@@ -1,6 +1,44 @@
 # Highlights - Yakuda Connect
 
-### 🚀 v1.3.0
+### 🚀 v1.3.1 — 2026-09-19
+
+#### 🇩🇪 Deutsch
+
+* **obah und XR HOTAS mit einem Klick.** Im Tools-Tab gibt es die neue Methode „Cargo“. Sie funktioniert auf jeder Distribution und installiert fehlendes Rust und benötigte Bibliotheken gleich mit.
+* **Du siehst, was passiert.** Die Installation läuft in einem Terminal. Geht etwas schief, bleibt das Fenster offen, und ein Protokoll liegt im Tool-Ordner.
+* **Updates inklusive.** Gibt es eine neue Version, zeigt die Karte „Aktualisieren“.
+* **Neuer Tab „Controls“.** Schalter für XR HOTAS und obah: einschalten, und fehlt das Werkzeug, fragt die App, wie sie es installieren soll – den Rest erledigt sie.
+* **obah-Auswahl ohne Terminal.** Spiel, Controller und zu ladende Bindings als Dropdowns – mit Häkchen, was es schon gibt.
+* **Bindings wie in SteamVR ansehen und bearbeiten.** Jedes Action Set als Tab, alle sieben Controller gezeichnet, eine Linie von jeder Belegung zur Taste. Voreingestellt: VRChat · Touch · xrizer. Klick auf eine Taste zum Bearbeiten, Speichern als xrizer/VapoR/OpenComposite.
+* **Selbst gestalten, ohne Durcheinander.** Karten ziehst du in jede Reihenfolge – die Karte darunter macht Platz, und es überlagert sich nichts. Den Controller verschiebst du für sich allein.
+* **Eigene Profile.** Anordnung und Belegung unter einem Namen speichern und jederzeit wieder laden.
+* **Posen, Haptik und Chords.** Alles, was in obah unter „Other" und „Chords" steht, gibt es hier in zwei eigenen Kästen – Tastenkombinationen inklusive.
+* **Nichts geht verloren.** Beim Schließen mit ungespeicherten Änderungen fragt die App nach.
+* **Eigene Controller-Bilder.** Die gezeichneten Controller liegen jetzt als Bilddateien in `assets/controls` und lassen sich austauschen — eigene Bilder kommen nach `~/.config/yakuda-connect/controls/` und überleben jedes Update.
+* **Mehr Übersicht, weniger Scrollen.** Beide Controller sitzen mittig im Kasten, „Controls per obah" klappt wirklich alles ein (nicht nur die Auswahl), und Posen/Vibration/Chords haben einen eigenen Aufklapp-Abschnitt, der zu bleibt, bis du ihn brauchst.
+* **Aufgeräumt-Modus.** Ein Knopf, und die Karten zeigen nur noch den Namen der Taste statt der ganzen Belegung. Einzelne Karten klappst du per Rechtsklick auf und zu; versteckst du die letzte von Hand, rastet der Knopf von selbst ein.
+* **Programme direkt aus dem Tools-Tab starten.** Jede installierte Karte hat jetzt „▶ Starten". Kommandozeilenprogramme wie obah oder XR HOTAS öffnen dabei ein Terminal, alles andere startet einfach.
+* **Die richtige Grafikkarte für WiVRn.** Unter Streaming wählst du aus, welche Karte benutzt wird. Auf Rechnern mit Prozessorgrafik und Steckkarte landet WiVRn sonst gern auf der falschen — beim vaapi-Encoder wird auch auf der gewählten Karte kodiert.
+
+#### 🇬🇧 English
+
+* **obah and XR HOTAS in one click.** The Tools tab has a new "Cargo" method. It works on any distribution and installs missing Rust and required libraries along the way.
+* **You see what's happening.** The installation runs in a terminal. If something goes wrong, the window stays open and a log is kept in the tool folder.
+* **Updates included.** When a new version is out, the card shows "Update".
+* **New "Controls" tab.** Switches for XR HOTAS and obah: turn one on, and if the tool is missing, the app asks how to install it and does the rest.
+* **obah selection without a terminal.** Game, controller and bindings to load as dropdowns — with checkmarks for what already exists.
+* **See and edit bindings like in SteamVR.** Every action set as a tab, all seven controllers drawn, a line from each binding to its button. Preset: VRChat · Touch · xrizer. Click a button to edit, save as xrizer/VapoR/OpenComposite.
+* **Arrange it yourself, without the mess.** Drag cards into any order — the card below makes room and nothing overlaps. The controller moves on its own.
+* **Your own profiles.** Save arrangement and bindings under a name and load them back any time.
+* **Poses, haptics and chords.** Everything obah keeps under "Other" and "Chords" gets its own box here — button combinations included.
+* **Nothing gets lost.** Closing the app with unsaved changes asks first.
+* **Your own controller images.** The drawn controllers are image files now, in `assets/controls`, and can be swapped — your own go into `~/.config/yakuda-connect/controls/` and survive every update.
+* **More overview, less scrolling.** Both controllers sit centred in the box, "Controls via obah" really collapses everything (not just the selection), and poses/haptics/chords get their own collapsible section that stays closed until you need it.
+* **Tidy view.** One button and the cards show only the input name instead of the whole binding. Single cards fold and unfold with a right-click; hide the last one by hand and the button latches on by itself.
+* **Launch programs straight from the Tools tab.** Every installed card now has "▶ Start". Command-line tools such as obah or XR HOTAS open in a terminal, everything else just starts.
+* **The right graphics card for WiVRn.** Under Streaming you pick which card is used. On machines with integrated graphics plus an add-in card WiVRn tends to pick the wrong one — with the vaapi encoder it encodes on the chosen card too.
+
+### 🚀 v1.3.0 — 2026-09-16
 
 #### 🇩🇪 Deutsch
 
@@ -22,7 +60,7 @@
 * **Changelog and highlights inside the app.** Two new buttons under Settings → General & Updates. You are reading one of them right now.
 * **Tidier settings.** The games settings moved to "Advanced / System".
 
-### 🚀 v1.2.9
+### 🚀 v1.2.9 — 2026-09-16
 
 #### 🇩🇪 Deutsch
 
@@ -38,7 +76,7 @@
 * **Add your own games.** If a game is missing, add it with "+ Add Game", including games outside Steam.
 * **Remove games.** Remove a wrongly detected game with one click. Nothing gets uninstalled.
 
-### 🚀 v1.2.8
+### 🚀 v1.2.8 — 2026-09-15
 
 #### 🇩🇪 Deutsch
 
@@ -54,7 +92,7 @@
 * **Copy diagnostics.** One click puts all important support info on your clipboard, without personal data.
 * **WiVRn app for the headset.** The app now downloads the version that matches your server, and can also just download it.
 
-### 🚀 v1.2.7
+### 🚀 v1.2.7 — 2026-09-14
 
 #### 🇩🇪 Deutsch
 
@@ -70,7 +108,7 @@
 * **A button against stutter.** "Fix network buffers" on the dashboard enlarges network buffers, permanently or just for this session.
 * **Autostart:** programs are suggested while you type.
 
-### 🚀 v1.2.6
+### 🚀 v1.2.6 — 2026-08-28
 
 #### 🇩🇪 Deutsch
 
@@ -80,7 +118,7 @@
 
 * **Your background image is now actually visible**, and the card opacity slider works.
 
-### 🚀 v1.2.5
+### 🚀 v1.2.5 — 2026-08-28
 
 #### 🇩🇪 Deutsch
 
@@ -92,7 +130,7 @@
 * **WiVRn stops on the first click.** Before, you sometimes had to stop the server two or three times.
 * The background image is shown, and "No image" works again.
 
-### 🚀 v1.2.4
+### 🚀 v1.2.4 — 2026-08-25
 
 #### 🇩🇪 Deutsch
 
@@ -102,7 +140,7 @@
 
 * **Debian, Ubuntu and Linux Mint:** WiVRn can now be installed right from the app, as a Flatpak by default.
 
-### 🚀 v1.2.3
+### 🚀 v1.2.3 — 2026-08-25
 
 #### 🇩🇪 Deutsch
 
@@ -118,7 +156,7 @@
 * **Tidier install tab:** source and button per program, status is checked when you open it.
 * The install script now also runs on Linux Mint and Ubuntu 24.04.
 
-### 🚀 v1.2.1
+### 🚀 v1.2.1 — 2026-08-23
 
 #### 🇩🇪 Deutsch
 
@@ -132,7 +170,7 @@
 * The firewall button and encoder choice are explained better, info icons are clickable again.
 * The update check of older versions works again.
 
-### 🚀 v1.2.0
+### 🚀 v1.2.0 — 2026-08-22
 
 #### 🇩🇪 Deutsch
 
@@ -142,7 +180,7 @@
 
 * **Support now goes through Ko-fi** instead of PayPal.
 
-### 🚀 v1.1.9
+### 🚀 v1.1.9 — 2026-08-20
 
 #### 🇩🇪 Deutsch
 
@@ -156,7 +194,7 @@
 * **Back up and restore game settings.** Handy when Steam resets everything after a Proton change.
 * "Create symlink" is now called "Picture Fix".
 
-### 🚀 v1.1.8
+### 🚀 v1.1.8 — 2026-08-18
 
 #### 🇩🇪 Deutsch
 
@@ -168,7 +206,7 @@
 * **Switching between WiVRn and SteamVR works more cleanly**, and the app remembers your previous setting.
 * A one-time automatic switch to xrizer happens when everything is ready for it.
 
-### 🚀 v1.1.7
+### 🚀 v1.1.7 — 2026-08-15
 
 #### 🇩🇪 Deutsch
 
@@ -182,7 +220,7 @@
 * OpenVR compatibility and encoder settings now work like in WiVRn itself.
 * Quest users find a Meta Store link below the APK installer.
 
-### 🚀 v1.1.6
+### 🚀 v1.1.6 — 2026-08-14
 
 #### 🇩🇪 Deutsch
 
@@ -198,7 +236,7 @@
 * Dialogs are readable on light desktop themes, and the English interface is fully English.
 * OpenXR fixes and VR priority now live under Settings → VR & OpenXR.
 
-### 🚀 v1.1.5
+### 🚀 v1.1.5 — 2026-08-14
 
 #### 🇩🇪 Deutsch
 
@@ -214,7 +252,7 @@
 * **Connect over USB automatically** as a new dashboard option.
 * The app starts noticeably faster.
 
-### 🚀 v1.1.4
+### 🚀 v1.1.4 — 2026-08-06
 
 #### 🇩🇪 Deutsch
 
@@ -226,7 +264,7 @@
 * **Important fix:** after a restore, Steam no longer started on non-Arch distributions. This is fixed.
 * On startup, the app checks whether your OpenXR settings could break Steam.
 
-### 🚀 v1.1.3
+### 🚀 v1.1.3 — 2026-07-25
 
 #### 🇩🇪 Deutsch
 
@@ -240,7 +278,7 @@
 * **More Proton options depending on your system**, installable with one click via ProtonPlus.
 * A new switch to launch games with GameMode.
 
-### 🚀 v1.1.2
+### 🚀 v1.1.2 — 2026-07-22
 
 #### 🇩🇪 Deutsch
 
@@ -254,7 +292,7 @@
 * **Microphone selection**, so your mic still reaches games with newer Proton.
 * **OSC-DreamChatbox** is now in the Tools tab.
 
-### 🚀 v1.1.1
+### 🚀 v1.1.1 — 2026-07-20
 
 #### 🇩🇪 Deutsch
 
@@ -268,7 +306,7 @@
 * **Cover art for every game**, and VR games in large libraries are found.
 * WayVR: design by cubee-cb, SlimeVR buttons can be shown or hidden, custom colors.
 
-### 🚀 v1.1.0
+### 🚀 v1.1.0 — 2026-07-09
 
 #### 🇩🇪 Deutsch
 
@@ -280,7 +318,7 @@
 * **A play button right on every game tile.**
 * Clearer launch options and more supported VR games.
 
-### 🚀 v1.0.9-alpha
+### 🚀 v1.0.9-alpha — 2026-07-09
 
 #### 🇩🇪 Deutsch
 
@@ -292,7 +330,7 @@
 * **New Games tab.** Shows your VR games with matching Proton recommendations and launch options, and starts them with one click.
 * Proton versions can be installed directly via ProtonPlus.
 
-### 🚀 v1.0.8-alpha
+### 🚀 v1.0.8-alpha — 2026-07-05
 
 #### 🇩🇪 Deutsch
 
@@ -302,7 +340,7 @@
 
 * Small interface cleanups.
 
-### 🚀 v1.0.7-alpha
+### 🚀 v1.0.7-alpha — 2026-07-05
 
 #### 🇩🇪 Deutsch
 
@@ -316,7 +354,7 @@
 * **One-click OpenXR fix for SteamVR.**
 * The app automatically creates a first backup of your VR setup.
 
-### 🚀 v1.0.6-alpha
+### 🚀 v1.0.6-alpha — 2026-07-03
 
 #### 🇩🇪 Deutsch
 
@@ -326,7 +364,7 @@
 
 * **The app can update itself.** When an update is available, click the green arrow on the dashboard.
 
-### 🚀 v1.0.5-alpha
+### 🚀 v1.0.5-alpha — 2026-06-30
 
 #### 🇩🇪 Deutsch
 
@@ -338,7 +376,7 @@
 * **Install via AUR, Flatpak or AppImage**, matching your distribution.
 * WiVRn as a Flatpak is fully supported, and NixOS users get a guided setup.
 
-### 🚀 v1.0.4-alpha
+### 🚀 v1.0.4-alpha — 2026-06-27
 
 #### 🇩🇪 Deutsch
 
@@ -348,7 +386,7 @@
 
 * **Autostart programs launch as soon as your headset connects**, and stop together with the server.
 
-### 🚀 v1.0.3-alpha
+### 🚀 v1.0.3-alpha — 2026-06-22
 
 #### 🇩🇪 Deutsch
 
@@ -358,7 +396,7 @@
 
 * **VR priority** for smoother streaming.
 
-### 🚀 v1.0.2-alpha
+### 🚀 v1.0.2-alpha — 2026-06-17
 
 #### 🇩🇪 Deutsch
 

@@ -42,7 +42,7 @@ import webbrowser
 # scripts/bump_version.py haelt sie automatisch mit core/version.py gleich,
 # und der Smoke-Test bricht ab, falls beide auseinanderlaufen oder das Muster
 # mehr als einmal vorkommt.
-APP_VERSION = "v1.3.0"
+APP_VERSION = "v1.3.1"
 
 # Community-Links (Settings -> "Community & Updates").
 # HIER werden Discord und Ko-fi gepflegt — es gibt keine zweite Stelle im
@@ -92,6 +92,7 @@ from tabs.dashboard_mixin import (DashboardMixin,          # noqa: F401
                                  PairingPinWorker)
 from tabs.games_mixin import GamesTabMixin
 from tabs.tools_mixin import ToolsTabMixin
+from tabs.controls_mixin import ControlsTabMixin
 
 # Interne Importe (liegen im selben Ordner 'core')
 from install_worker import (InstallWorker, UpdateWorker, AppUpdateCheckWorker,
@@ -255,7 +256,7 @@ class PackageCheckWorker(QThread):
         self.result_signal.emit(results, updates_available)
 
 
-class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
+class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMainWindow):
     """
     Hauptfenster.
 
@@ -1151,11 +1152,16 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
             card["btn_install"].clicked.connect(
                 lambda checked=False, k=key: self.on_tool_action(k)
             )
+            card["btn_start"].clicked.connect(
+                lambda checked=False, k=key: self.start_tool(k)
+            )
             self._populate_method_combo(card)
         self.ui.btn_tools_check.clicked.connect(self.start_tools_update_check)
         # Filterleiste erst hier aufbauen: sie liest die Kategorien aus den
         # fertig angelegten Karten.
         self.setup_tools_filter()
+        # Controls-Tab nutzt die Tool-Karten zum Installieren -> danach.
+        self.setup_controls_tab_logic()
 
         # Settings Tab
         # HINWEIS: btn_vrchat_symlink wird NICHT mehr hier verbunden — der
@@ -1223,8 +1229,11 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         if index == 2: self.refresh_openvr_ui()
         if index == 3: self.check_tools_status()
         if index == 4: self.on_games_tab_opened()
+        if index == self.ui.pages.indexOf(self.ui.tab_controls):
+            self.refresh_controls_status()
         # Runtime/Prioritaet koennen sich ausserhalb der App geaendert haben
-        if index == 5 and hasattr(self.ui, "vr_runtime_widget"):
+        if index == self.ui.pages.indexOf(self.ui.tab_settings) \
+                and hasattr(self.ui, "vr_runtime_widget"):
             self.ui.vr_runtime_widget.refresh()
 
     # ------------------------------------------------------------------ #
@@ -1280,6 +1289,9 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
 
         # 1) Alle STATISCHEN Texte zentral neu setzen (Sidebar, alle Tabs).
         self.ui.retranslate_ui()
+        # Dropdown-Eintraege im Controls-Tab (obah) haengen an der Sprache.
+        if hasattr(self, "obah_retranslate"):
+            self.obah_retranslate()
 
         # 2) Streaming-Tab (eigenes Widget) ebenfalls neu übersetzen.
         if hasattr(self, 'streaming_settings') and hasattr(self.streaming_settings, 'retranslate'):
@@ -2713,7 +2725,7 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         Ueber die Sidebar (nicht direkt ueber pages), damit die Sperre aus
         on_tab_changed greift, solange Grundpakete fehlen.
         """
-        self.ui.sidebar.setCurrentRow(5)
+        self.ui.sidebar.setCurrentRow(self.ui.pages.indexOf(self.ui.tab_settings))
         if hasattr(self.ui, "settings_subtabs"):
             self.ui.settings_subtabs.setCurrentIndex(1)   # 1 = VR & OpenXR
         if hasattr(self.ui, "vr_runtime_widget"):
@@ -3421,16 +3433,24 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         # "Client connected"-Ereignis sauber erkannt werden kann. Eine Datei
         # blockiert nicht – anders als eine PIPE, die volllaufen und den Server
         # einfrieren lassen könnte.
+        # Grafikkarte aus dem Streaming-Tab erzwingen (leer = automatisch).
+        # Muss beim START gesetzt werden: Vulkan sucht sich das Geraet beim
+        # Hochfahren des Servers aus, spaeter ist nichts mehr zu machen.
+        import gpu_select
+        server_env = gpu_select.apply_to(os.environ, current_settings.get("gpu_device", ""))
+
         try:
             os.makedirs(os.path.dirname(self._server_log_path), exist_ok=True)
             self._server_log_fh = open(self._server_log_path, "w")
             self.server_process = subprocess.Popen(
-                ["wivrn-server"], stdout=self._server_log_fh, stderr=subprocess.STDOUT)
+                ["wivrn-server"], stdout=self._server_log_fh, stderr=subprocess.STDOUT,
+                env=server_env)
         except Exception as e:
             log.warning(f"[Server] Konnte Logdatei nicht anlegen ({e}) – starte ohne Log.")
             self._server_log_fh = None
             self.server_process = subprocess.Popen(
-                ["wivrn-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                ["wivrn-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=server_env)
 
         log.info("[Autostart] Server gestartet – warte auf Headset-Verbindung, bevor Programme starten...")
         self._server_running = True
@@ -3690,6 +3710,7 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         "_doctor_worker",           # adb-Diagnose/Reparatur
         "_pin_worker",              # PIN-Zeile von wivrnctl pair
         "_usb_worker",              # USB-Ampel im Dashboard
+        "_obah_scan_worker",        # Controls-Tab: Spiele mit OpenVR-Bindings
     )
 
     def closeEvent(self, event):
@@ -3702,6 +3723,13 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, QMainWindow):
         if self._exit_cleanup_done:
             event.accept()
             return
+        # Ungespeicherte Bindings im Controls-Tab: nachfragen. NICHT beim
+        # Beenden per Signal (Abmelden, Herunterfahren) — dort wuerde ein
+        # modaler Dialog die Sitzung aufhalten, bis jemand klickt.
+        if getattr(self, "_obah_dirty", False) and not exit_guard.quit_requested_by_signal:
+            if not self.confirm_obah_close():
+                event.ignore()
+                return
         self._exit_cleanup_done = True
 
         # Zuerst die Timer anhalten: ein Tick waehrend des Aufraeumens wuerde

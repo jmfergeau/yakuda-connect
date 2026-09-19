@@ -11,12 +11,16 @@ ueber AppImage, Flatpak oder Paketmanager, sowie den Update-Check.
 Auch das ist ein MIXIN — self.ui und die Worker-Attribute stammen aus VRApp.
 """
 
+import os
+
 from PySide6.QtWidgets import QMessageBox
 from PySide6.QtCore import QThread, Signal as QtSignal
 
 import appimage_installer as appimg
 import paths
 from appimage_installer import AppImageInstallWorker
+import cargo_installer
+from cargo_installer import CargoInstallWorker
 from install_worker import InstallWorker, RemoveWorker, RpmInstallWorker
 from jsonio import read_json, write_json_atomic
 from translations import tr, get_language
@@ -104,10 +108,11 @@ class ToolsTabMixin:
         """
         st = card.get("status") or {}
         installed = (st.get("appimage_installed") or st.get("pm_installed")
-                     or st.get("flatpak_installed"))
+                     or st.get("flatpak_installed") or st.get("cargo_installed"))
         if not installed:
             return "missing"
-        if st.get("appimage_has_update") or st.get("pm_has_update"):
+        if (st.get("appimage_has_update") or st.get("pm_has_update")
+                or st.get("cargo_has_update")):
             return "update"
         return "installed"
 
@@ -200,6 +205,9 @@ class ToolsTabMixin:
         pm_upd        = status.get("pm_has_update", False)
         flatpak_inst  = status.get("flatpak_installed", False)
         flatpak_ver   = status.get("flatpak_version", "")
+        cargo_inst    = status.get("cargo_installed", False)
+        cargo_ver     = status.get("cargo_version", "")
+        cargo_upd     = status.get("cargo_has_update", False)
         config_ok     = status.get("config_present", False)
 
         methods = card.get("methods") or []
@@ -210,7 +218,8 @@ class ToolsTabMixin:
 
         # Dropdown nur zeigen, wenn Auswahl besteht UND noch installiert/aktualisiert werden kann
         show_combo = (combo is not None and len(methods) >= 2
-                      and not appimage_inst and not pm_inst and not flatpak_inst)
+                      and not appimage_inst and not pm_inst and not flatpak_inst
+                      and not cargo_inst)
         if combo is not None:
             combo.setVisible(show_combo)
 
@@ -225,6 +234,21 @@ class ToolsTabMixin:
             else:
                 card["lbl_update"].setText("")
                 btn.setText(tr("tools_delete"))         # 🗑 Löschen
+            btn.setEnabled(True)
+
+        elif cargo_inst:
+            # Wie AppImage: liegt komplett im eigenen Tool-Ordner, also
+            # Loeschen ohne sudo; bei neuer Version auf crates.io -> Update.
+            card["lbl_version"].setText(f"v{cargo_ver}" if cargo_ver else "")
+            st.setText(tr("tools_cargo_ok"))
+            st.setStyleSheet("color: #a3be8c; font-size: 12px; font-weight: bold;")
+            card["cmd_widget"].setVisible(True)
+            if cargo_upd:
+                card["lbl_update"].setText(tr("tools_update"))
+                btn.setText(tr("tools_update_btn"))
+            else:
+                card["lbl_update"].setText("")
+                btn.setText(tr("tools_delete"))
             btn.setEnabled(True)
 
         elif pm_inst:
@@ -287,6 +311,9 @@ class ToolsTabMixin:
         # Nach Installation/Entfernung kann die Karte aus dem aktiven
         # Status-Filter herausfallen (oder neu hineinfallen).
         self.apply_tools_filter()
+        # Controls-Tab mitziehen (z. B. hier geloescht -> Schalter aus).
+        if hasattr(self, "on_control_tool_status"):
+            self.on_control_tool_status(key, status)
 
     def start_tools_update_check(self):
         """Startet den echten Versions-Check im Hintergrund."""
@@ -334,7 +361,7 @@ class ToolsTabMixin:
         methods = appimg.detect_install_methods(tool)
         card["methods"] = methods
         labels = {"appimage": "AppImage", "yay": "yay", "paru": "paru",
-                  "flatpak": "Flatpak", "rpm": "RPM (dnf)"}
+                  "flatpak": "Flatpak", "rpm": "RPM (dnf)", "cargo": "Cargo"}
         combo.blockSignals(True)
         combo.clear()
         for mthd in methods:
@@ -366,12 +393,50 @@ class ToolsTabMixin:
         # AppImage installiert + kein Update -> Löschen
         if status.get("appimage_installed") and not status.get("appimage_has_update"):
             self.delete_tool(key)
+        elif status.get("cargo_installed") and not status.get("cargo_has_update"):
+            self.delete_tool(key)
         elif status.get("pm_installed"):
             # Per yay/paru installiert -> Paket entfernen
             self.remove_tool_pm(key)
         else:
             # sonst Installieren bzw. Aktualisieren (per gewählter Methode)
             self.install_tool(key)
+
+    def start_tool(self, key):
+        """
+        Installiertes Werkzeug aus seiner Karte heraus starten.
+
+        Der Knopf sitzt in derselben Zeile wie der Startbefehl und ist damit
+        nur zu sehen, wenn das Werkzeug installiert ist. Trotzdem kann der
+        Befehl fehlen (per Hand geloescht, Paket kaputt) — dann kommt eine
+        Meldung statt eines stillen Nichts.
+        """
+        import tool_launcher
+
+        card = self.ui.tool_cards.get(key)
+        if not card:
+            return
+        tool = card.get("tool", {})
+        status = card.get("status", {}) or {}
+        name = tool.get("name", key)
+
+        terminal = None
+        if tool_launcher.wants_terminal(tool):
+            from install_worker import find_terminal
+            terminal = find_terminal()
+
+        try:
+            tool_launcher.start(tool, status, terminal=terminal,
+                                texts={"exit_code": tr("controls_exit_code"),
+                                       "press_enter": tr("controls_press_enter")})
+        except FileNotFoundError:
+            QMessageBox.warning(self, name, tr("tools_start_missing").format(
+                cmd=tool.get("start_cmd", key)))
+        except RuntimeError:
+            QMessageBox.warning(self, name, tr("tools_cargo_no_terminal"))
+        except OSError as exc:
+            log.warning("Start von %s fehlgeschlagen: %s", key, exc)
+            QMessageBox.warning(self, name, str(exc))
 
     def install_tool(self, key):
         """Installiert/aktualisiert ein Tool — per gewählter Methode (AppImage/yay/paru)."""
@@ -385,7 +450,12 @@ class ToolsTabMixin:
             QMessageBox.information(self, tool.get("name", key), tr("tools_no_method"))
             return
 
-        updating = bool(status.get("appimage_installed") and status.get("appimage_has_update"))
+        updating = bool((status.get("appimage_installed") and status.get("appimage_has_update"))
+                        or (status.get("cargo_installed") and status.get("cargo_has_update")))
+        if status.get("cargo_installed"):
+            # Update eines Cargo-Tools laeuft immer ueber Cargo — egal, was im
+            # (dann ausgeblendeten) Dropdown steht.
+            method = "cargo"
 
         # AppImage, aber Config-Ordner schon vorhanden -> vorher warnen (Konflikte vermeiden)
         if method == "appimage" and status.get("config_present") and not status.get("appimage_installed"):
@@ -419,6 +489,17 @@ class ToolsTabMixin:
             # Fedora: RPM aus dem neuesten GitHub-Release, Installation per dnf
             # im Terminal (root noetig).
             self.tool_worker = RpmInstallWorker(tool)
+            self.tool_worker.status_signal.connect(
+                lambda msg, k=key: self._set_tool_status(k, msg)
+            )
+            self.tool_worker.finished_signal.connect(
+                lambda success, k=key: self.on_tool_installed(k, success)
+            )
+            self.tool_worker.start()
+        elif method == "cargo":
+            # Sichtbares Terminal: Compiler/Rust nachinstallieren, bauen,
+            # verlinken. Bei Fehlern bleibt das Fenster offen.
+            self.tool_worker = CargoInstallWorker(tool, lang=get_language())
             self.tool_worker.status_signal.connect(
                 lambda msg, k=key: self._set_tool_status(k, msg)
             )
@@ -463,11 +544,15 @@ class ToolsTabMixin:
         card["btn_install"].setEnabled(False)
         card["btn_install"].setText(tr("tools_deleting"))
 
-        # AppImage, Symlink und Desktop-Eintrag immer entfernen
+        # Cargo-Tool: Ordner + Startbefehl. Sonst AppImage, Symlink und
+        # Desktop-Eintrag.
         try:
-            appimg.uninstall(tool)
+            if (card.get("status") or {}).get("cargo_installed"):
+                cargo_installer.uninstall(tool)
+            else:
+                appimg.uninstall(tool)
         except Exception as e:
-            log.warning(f"[AppImage] Löschen fehlgeschlagen: {e}")
+            log.warning(f"[Tools] Löschen fehlgeschlagen: {e}")
 
         # Config-Ordner nur auf Wunsch
         if also_config:
@@ -574,7 +659,16 @@ class ToolsTabMixin:
             if key == "wayvr":
                 QMessageBox.information(self, tr("overlay_popup_title"), tr("overlay_popup_text"))
         else:
-            card["lbl_status"].setText(tr("tools_install_error"))
+            msg = tr("tools_install_error")
+            tool = card.get("tool", {})
+            if "cargo" in appimg.supported_methods(tool) \
+                    and os.path.exists(cargo_installer.log_path(tool)):
+                # Der Nutzer soll wissen, wo er nachlesen kann.
+                msg += " — " + cargo_installer.log_path(tool).replace(os.path.expanduser("~"), "~", 1)
+            card["lbl_status"].setText(msg)
             card["lbl_status"].setStyleSheet("color: #bf616a; font-size: 12px;")
             card["btn_install"].setText(tr("tools_retry"))
             card["btn_install"].setEnabled(True)
+        # Kam die Installation aus dem Controls-Tab? Dann dort Schalter setzen.
+        if hasattr(self, "on_control_install_finished"):
+            self.on_control_install_finished(key, success)
