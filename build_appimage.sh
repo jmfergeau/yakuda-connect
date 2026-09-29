@@ -221,6 +221,62 @@ if ! pip install --target="$BUILD_DIR/usr/lib/python3" "PySide6-Essentials>=6.5"
 fi
 find "$BUILD_DIR/usr/lib/python3" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 
+# --- xcb-Bibliotheken mitliefern --------------------------------------------
+# Seit Qt 6.5 braucht das xcb-Plugin (X11) libxcb-cursor0 und weitere
+# xcb-util-Bibliotheken. Die sind auf vielen Systemen NICHT installiert
+# (z. B. Ubuntu 22.04, auch der AppImage-Katalog-Test) -> Abbruch mit
+# "xcb-cursor0 or libxcb-cursor0 is needed to load the Qt xcb platform plugin".
+# Wir nehmen sie bewusst aus Ubuntu 22.04 (glibc 2.35) statt vom Build-Rechner:
+# Bibliotheken von Arch/CachyOS wuerden eine zu neue glibc voraussetzen.
+# Sie landen in PySide6/Qt/lib — dort findet Qt sie ueber seinen RUNPATH,
+# ohne LD_LIBRARY_PATH (das wuerde sonst an Steam/WiVRn weitervererbt).
+QT_LIB_DIR="$BUILD_DIR/usr/lib/python3/PySide6/Qt/lib"
+if [ -d "$QT_LIB_DIR" ]; then
+    echo "      Buendele xcb-Bibliotheken fuer Qt (aus Ubuntu 22.04)..."
+    UBU="https://archive.ubuntu.com/ubuntu/pool"
+    XCB_DEBS=(
+        "universe/x/xcb-util-cursor/libxcb-cursor0_0.1.1-4ubuntu1_amd64.deb"
+        "main/x/xcb-util-wm/libxcb-icccm4_0.4.1-1.1build2_amd64.deb"
+        "main/x/xcb-util-image/libxcb-image0_0.4.0-2_amd64.deb"
+        "main/x/xcb-util-keysyms/libxcb-keysyms1_0.4.0-1build3_amd64.deb"
+        "main/x/xcb-util-renderutil/libxcb-render-util0_0.3.9-1build3_amd64.deb"
+        "main/x/xcb-util/libxcb-util1_0.4.0-1build2_amd64.deb"
+        "main/libx/libxcb/libxcb-xkb1_1.14-3ubuntu3_amd64.deb"
+        "main/libx/libxkbcommon/libxkbcommon-x11-0_1.4.0-1_amd64.deb"
+    )
+    DEB_CACHE="$CACHE_DIR/debs"
+    mkdir -p "$DEB_CACHE"
+    for rel in "${XCB_DEBS[@]}"; do
+        deb="$DEB_CACHE/$(basename "$rel")"
+        if [ ! -s "$deb" ]; then
+            curl -fsSL "$UBU/$rel" -o "$deb" || {
+                rm -f "$deb"
+                echo "[Fehler] Download fehlgeschlagen: $UBU/$rel" >&2
+                exit 1
+            }
+        fi
+        tmp="$(mktemp -d)"
+        # .deb = ar-Archiv mit data.tar.* darin. bsdtar (Arch: immer da)
+        # kann beides direkt; sonst ar + tar.
+        if command -v bsdtar >/dev/null 2>&1; then
+            bsdtar -xOf "$deb" 'data.tar.*' | bsdtar -xf - -C "$tmp"
+        else
+            (cd "$tmp" && ar x "$deb" && tar -xf data.tar.*)
+        fi
+        cp -a "$tmp"/usr/lib/x86_64-linux-gnu/*.so* "$QT_LIB_DIR/"
+        rm -rf "$tmp"
+    done
+    for so in libxcb-cursor.so.0 libxcb-icccm.so.4 libxcb-image.so.0 \
+              libxcb-keysyms.so.1 libxcb-render-util.so.0 libxcb-util.so.1 \
+              libxcb-xkb.so.1 libxkbcommon-x11.so.0; do
+        if [ ! -e "$QT_LIB_DIR/$so" ]; then
+            echo "[Fehler] $so fehlt nach dem Entpacken." >&2
+            exit 1
+        fi
+    done
+    echo "      OK (8 Bibliotheken)"
+fi
+
 # --- AppRun -----------------------------------------------------------------
 # Laeuft ERST, nachdem die Runtime das Abbild eingehaengt hat. Fehler beim
 # Einhaengen selbst kann es also nicht abfangen (siehe Kopf der Datei) — aber
@@ -246,6 +302,19 @@ fi
 exec "$HERE/usr/bin/yakuda-connect" "$@"
 APPRUN
 chmod +x "$BUILD_DIR/AppRun"
+
+# --- Dateirechte vereinheitlichen -------------------------------------------
+# cp uebernimmt die Rechte aus dem Projektordner. Hat dort eine Datei 600
+# (nur Besitzer), kann sie in der AppImage nur der Ersteller lesen — jeder
+# andere Benutzer bekommt "PermissionError" beim Import (so geschehen beim
+# AppImage-Katalog-Test mit core/translations.py). Darum: alles fuer alle
+# lesbar, Ordner und ausfuehrbare Dateien fuer alle ausfuehrbar.
+chmod -R u+rwX,go+rX,go-w "$BUILD_DIR"
+if find "$BUILD_DIR" ! -perm -o+r | grep -q .; then
+    echo "[Fehler] Dateien in der AppDir sind nicht fuer alle lesbar:" >&2
+    find "$BUILD_DIR" ! -perm -o+r >&2
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Bauen

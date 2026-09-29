@@ -1,5 +1,15 @@
 # Changelog - Yakuda Connect
 
+### 🚀 v1.3.9 — 2026-09-29
+
+#### 🇩🇪 Deutsch
+
+* **appiamge fix berehtigung**
+
+#### 🇬🇧 English
+
+* **appiamge fix permissions**.
+
 ### 🚀 v1.3.8 — 2026-09-26
 
 #### 🇩🇪 Deutsch
