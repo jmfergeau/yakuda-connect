@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget,
                                QComboBox, QLineEdit, QGroupBox, QFormLayout,
                                QTextEdit, QFrame, QGridLayout,
                                QTabWidget, QToolButton, QPlainTextEdit,
-                               QScrollArea, QSizePolicy, QApplication)
+                               QScrollArea, QSizePolicy, QApplication, QTabBar)
 from PySide6.QtCore import Qt, QPropertyAnimation, Property, QRectF, QSize
 from PySide6.QtGui import QPainter, QColor
 
@@ -211,14 +211,14 @@ class Ui_MainWindow:
             }
 
             /* Eingabefelder und Dropdowns */
-            QLineEdit, QComboBox {
+            QLineEdit, QComboBox, QSpinBox {
                 background-color: #1e222a;
                 border: 1px solid #3b4252;
                 border-radius: 4px;
                 padding: 6px;
                 color: #eceff4;
             }
-            QLineEdit:focus, QComboBox:focus {
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
                 border: 1px solid #88c0d0;
             }
 
@@ -316,7 +316,9 @@ class Ui_MainWindow:
         # Eltern-Fenster dieselben Farben.
         _app = QApplication.instance()
         if _app is not None:
-            _app.setStyleSheet(_stylesheet)
+            from ui import theme
+            theme.remember_app_base(_stylesheet)
+            _app.setStyleSheet(theme.tint(_stylesheet, allow_opacity=False))
         else:
             main_window.setStyleSheet(_stylesheet)
 
@@ -436,7 +438,10 @@ class Ui_MainWindow:
         # Initialisiere die einzelnen Bereiche
         self.setup_installation_tab()
         self.setup_dashboard_tab()
-        self.setup_tools_tab()
+        # Tools-Tab erst beim ersten Oeffnen bauen (ensure_tools_tab): gut
+        # 430 Widgets / ~10 MB, die die meisten Sitzungen nie brauchen.
+        self.tool_cards = {}
+        self._tools_built = False
         self.setup_games_tab()
         self.setup_controls_tab()
         self.setup_settings_tab()
@@ -500,6 +505,8 @@ class Ui_MainWindow:
         self.txt_code.setPlaceholderText(tr("dashboard_pair_gen"))
         self.autostart_group.setTitle(tr("dashboard_autostart"))
         self.lbl_app_count.setText(tr("dashboard_app_count"))
+        self.btn_autostart_add_vr_row.setText(tr("autostart_profile_add_row"))
+        self.lbl_vr_hint.setText(tr("autostart_vr_hint"))
         self.btn_autostart_reset.setText(tr("dashboard_autostart_reset"))
         self.btn_autostart_kill.setText(tr("dashboard_autostart_kill"))
         self.btn_autostart_kill.setToolTip(tr("autostart_kill_tip"))
@@ -540,6 +547,10 @@ class Ui_MainWindow:
         self.chk_games_autoscan.setToolTip(tr("games_autoscan_tip"))
         self.chk_stop_server_with_app.setText(tr("exit_stop_server_label"))
         self.chk_stop_server_with_app.setToolTip(tr("exit_stop_server_tip"))
+        self.btn_cli_setup.setText(tr("cli_setup_btn"))
+        self.btn_cli_setup.setToolTip(tr("cli_setup_tip"))
+        self.btn_cli_open.setText(tr("cli_open_btn"))
+        self.btn_cli_open.setToolTip(tr("cli_open_tip"))
         self.btn_games_reset.setText(tr("games_reset_btn"))
         self.btn_games_reset.setToolTip(tr("games_reset_tip"))
         self.btn_games_scan.setText(tr("games_scan_btn"))
@@ -621,8 +632,17 @@ class Ui_MainWindow:
                 row["lbl_title"].setText(tr(row["title_key"]))
                 row["lbl_desc"].setText(tr(row["desc_key"]))
                 row["btn_start"].setText(tr("controls_start_btn"))
-            self.btn_obah_expand.setText(tr("obah_panel_title"))
+            self.btn_obah_expand.setText(tr("obah_panel_title").replace("&", "&&"))
+            if hasattr(self, "xrbinder_card"):
+                self.xrbinder_card.retranslate()
+                self.btn_xr_reset_all.setText(tr("xrb_reset_all"))
+                self.btn_xr_reset_all.setToolTip(tr("xrb_reset_all_tip"))
+                self.btn_xr_template.setText(tr("xrb_template"))
+                self.btn_xr_template.setToolTip(tr("xrb_template_tip"))
             self.btn_obah_refresh.setText(tr("obah_refresh_btn"))
+            self.btn_obah_pick_manifest.setText(tr("obah_pick_manifest"))
+            self.btn_obah_pick_manifest.setToolTip(tr("obah_pick_manifest_tip"))
+            self.btn_obah_clear_manifest.setToolTip(tr("obah_clear_manifest_tip"))
             self.btn_obah_layout_reset.setText(tr("obah_layout_reset"))
             self.btn_obah_tidy.setText(tr("obah_tidy"))
             self.btn_obah_tidy.setToolTip(tr("obah_tidy_tip"))
@@ -637,7 +657,11 @@ class Ui_MainWindow:
             self.btn_obah_profile_save.setText(tr("obah_profile_save"))
             self.btn_obah_profile_delete.setText(tr("obah_profile_delete"))
 
-        # --- Tools-Tab ---
+        # --- Tools-Tab (nur, wenn schon gebaut) ---
+        if self._tools_built:
+            self._retranslate_tools_tab()
+
+    def _retranslate_tools_tab(self):
         self.lbl_tools_title.setText(tr("tools_title"))
         self.lbl_tools_subtitle.setText(tr("tools_subtitle"))
         self.btn_tools_check.setText(tr("tools_check_btn"))
@@ -858,14 +882,8 @@ class Ui_MainWindow:
         self.lbl_wivrn_ver = QLabel("<b>WiVRn Version:</b> " + tr("tools_checking"))
         self.lbl_wivrn_ver.setStyleSheet("color: #81a1c1;")
 
-        self.combo_language = QComboBox()
-        self.combo_language.addItems(["🇬🇧 English", "🇩🇪 Deutsch"])
-        self.combo_language.setFixedWidth(120)
-        self.combo_language.setStyleSheet("""
-            QComboBox { background-color: #3b4252; color: #d8dee9; border: 1px solid #4c566a;
-                        border-radius: 4px; padding: 2px 6px; font-size: 11px; }
-            QComboBox::drop-down { border: none; }
-        """)
+        # Die Sprachauswahl ist in die Einstellungen (Allgemein) umgezogen —
+        # dort sucht man sie, und die Liste waechst mit jeder locales/*.json.
 
         # Kleiner Update-Pfeil direkt neben der App-Version.
         # Standardmäßig unsichtbar; main.py blendet ihn nur ein, wenn auf GitHub
@@ -888,8 +906,6 @@ class Ui_MainWindow:
         version_layout.addWidget(self.lbl_app_ver)
         version_layout.addWidget(self.btn_app_update)
         version_layout.addStretch()
-        version_layout.addWidget(self.combo_language)
-        version_layout.addSpacing(12)
         version_layout.addWidget(self.lbl_wivrn_ver)
         layout.addLayout(version_layout)
 
@@ -1066,8 +1082,24 @@ class Ui_MainWindow:
         self.num_apps = QLineEdit("1")
         self.num_apps.setFixedWidth(50)
         self.num_apps.setAlignment(Qt.AlignCenter)
+        # Zaehler bleibt als Speicherwert (autostart_count), bedient wird
+        # aber per „+ Programm“ / ✕ wie in den Profil-Tabs.
+        self.lbl_app_count.setVisible(False)
+        self.num_apps.setVisible(False)
         count_row.addWidget(self.lbl_app_count)
         count_row.addWidget(self.num_apps)
+        # „+ Programm“ oben links ueber den Zeilen — dort war sonst nur Leere.
+        self.btn_autostart_add_vr_row = QPushButton(tr("autostart_profile_add_row"))
+        self.btn_autostart_add_vr_row.setCursor(Qt.PointingHandCursor)
+        self.btn_autostart_add_vr_row.setStyleSheet(
+            "QPushButton { background-color:#434c5e; color:#eceff4; border:none;"
+            " font-weight:bold; border-radius:4px; padding:4px 12px; }"
+            "QPushButton:hover { background-color:#5e81ac; }")
+        self.lbl_vr_hint = QLabel(tr("autostart_vr_hint"))
+        self.lbl_vr_hint.setStyleSheet("color:#7b88a1; font-size:11px;")
+        count_row.addWidget(self.btn_autostart_add_vr_row)
+        count_row.addSpacing(10)
+        count_row.addWidget(self.lbl_vr_hint)
         count_row.addStretch()
 
         # Timer neu scharfschalten (kompakt, rechts neben dem Zähler).
@@ -1087,12 +1119,21 @@ class Ui_MainWindow:
 
         count_row.addWidget(self.btn_autostart_reset)
         count_row.addWidget(self.btn_autostart_kill)
-        autostart_layout.addLayout(count_row)
+
+        # Das Dashboard zeigt nur den festen VR-Autostart (startet beim
+        # Headset-Verbinden). Die Autostart-PROFILE (Bedingung „Spiel laeuft“)
+        # liegen im Streaming-Tab — siehe core/tabs/autostart_profiles_mixin.py.
+        vr_page = QWidget()
+        vr_layout = QVBoxLayout(vr_page)
+        vr_layout.setContentsMargins(0, 0, 0, 0)
+        vr_layout.addLayout(count_row)
 
         self.autostart_container = QWidget()
         self.autostart_container_layout = QVBoxLayout(self.autostart_container)
         self.autostart_container_layout.setContentsMargins(0, 0, 0, 0)
-        autostart_layout.addWidget(self.autostart_container)
+        vr_layout.addWidget(self.autostart_container)
+
+        autostart_layout.addWidget(vr_page)
         layout.addWidget(self.autostart_group)
 
         # --- Gekoppelte Headsets ------------------------------------------
@@ -1536,6 +1577,23 @@ class Ui_MainWindow:
         # ==============================================================
         page_gen, gen_v = self._settings_new_page()
 
+        # -- Sprache --
+        # Ganz oben: wer die Sprache nicht versteht, soll sie sofort finden.
+        # Die Liste kommt aus locales/*.json (Anzeigename = "language_name"),
+        # eine neue Sprache braucht also keine Code-Aenderung.
+        from translations import TRANSLATIONS
+        card, cv = self._settings_card()
+        head, _, _ = self._settings_header("language_group", lambda: tr("language_desc"))
+        self.combo_language = QComboBox()
+        self.combo_language.setMinimumWidth(200)
+        langs = sorted(TRANSLATIONS.items(),
+                       key=lambda kv: (kv[0] != "en", kv[1].get("language_name", kv[0]).lower()))
+        for code, texts in langs:
+            self.combo_language.addItem(texts.get("language_name", code), code)
+        head.addWidget(self.combo_language)
+        cv.addLayout(head)
+        gen_v.addWidget(card)
+
         # -- Community & Updates --
         card, cv = self._settings_card()
         head, _, _ = self._settings_header("community_group")
@@ -1829,6 +1887,24 @@ class Ui_MainWindow:
         cv.addWidget(self.chk_stop_server_with_app)
         adv_v.addWidget(card)
 
+        # -- Terminal-Modus --
+        # Direkt unter "App beenden": beides betrifft, wie die App laeuft.
+        # Der Terminal-Modus (core/cli.py) laedt kein Qt und spart so RAM.
+        card, cv = self._settings_card()
+        head, _, _ = self._settings_header("cli_group", lambda: tr("cli_group_desc"))
+        self.btn_cli_setup = QPushButton(tr("cli_setup_btn"))
+        self.btn_cli_setup.setCursor(Qt.PointingHandCursor)
+        self.btn_cli_setup.setToolTip(tr("cli_setup_tip"))
+        self.btn_cli_setup.setStyleSheet(self._CSS_SECONDARY)
+        head.addWidget(self.btn_cli_setup)
+        self.btn_cli_open = QPushButton(tr("cli_open_btn"))
+        self.btn_cli_open.setCursor(Qt.PointingHandCursor)
+        self.btn_cli_open.setToolTip(tr("cli_open_tip"))
+        self.btn_cli_open.setStyleSheet(self._CSS_PRIMARY)
+        head.addWidget(self.btn_cli_open)
+        cv.addLayout(head)
+        adv_v.addWidget(card)
+
         # -- Spiele --
         # Bis v1.2.9 unter "Allgemein & Updates". Der Schalter aendert, wie
         # die App sich verhaelt, und das Zuruecksetzen greift in die Config
@@ -2000,6 +2076,15 @@ class Ui_MainWindow:
                 "btn_start": btn_start, "title_key": title_key, "desc_key": desc_key,
             }
 
+        # xrBinder: eigene Karte im selben Stil, direkt ueber dem Bereich
+        # „Controls per obah & xrBinder“ (OpenXR-Spiele stehen dort mit in der
+        # Spieleliste, siehe core/tabs/xr_controls_mixin.py).
+        from xrbinder_session import XrBinderSession
+        from ui.xrbinder_panel import XrBinderCard
+        self.xrbinder_session = XrBinderSession()
+        self.xrbinder_card = XrBinderCard(self.xrbinder_session)
+        outer.addWidget(self.xrbinder_card)
+
         outer.addWidget(self._build_obah_panel())
         outer.addStretch()
 
@@ -2027,7 +2112,7 @@ class Ui_MainWindow:
         self.btn_obah_expand.setCursor(Qt.PointingHandCursor)
         self.btn_obah_expand.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.btn_obah_expand.setArrowType(Qt.RightArrow)
-        self.btn_obah_expand.setText(tr("obah_panel_title"))
+        self.btn_obah_expand.setText(tr("obah_panel_title").replace("&", "&&"))
         self.btn_obah_expand.setStyleSheet("""
             QToolButton { background: transparent; border: none; color: #eceff4;
                           font-size: 13px; font-weight: bold; padding: 2px; }
@@ -2047,6 +2132,40 @@ class Ui_MainWindow:
         self.btn_obah_refresh.setVisible(False)
         head.addWidget(self.btn_obah_refresh)
         v.addLayout(head)
+
+        # ---- Hinweis: obah und/oder xrBinder fehlen (controls_mixin.
+        #      update_controls_notice blendet die Zeilen ein/aus)
+        self.obah_notice = QFrame()
+        self.obah_notice.setObjectName("obahnotice")
+        self.obah_notice.setStyleSheet("""
+            QFrame#obahnotice { background-color: #2e2a22; border-radius: 5px;
+                                border: 1px solid #5c4d2e; }
+            QLabel { color: #ebcb8b; font-size: 12px; background: transparent; border: none; }
+            QPushButton { background-color: #5e81ac; color: white; font-size: 11px;
+                          font-weight: bold; padding: 0px 14px; border-radius: 4px; border: none; }
+            QPushButton:hover { background-color: #81a1c1; }
+            QPushButton:disabled { background-color: #3b4252; color: #7b88a1; }
+        """)
+        notice_v = QVBoxLayout(self.obah_notice)
+        notice_v.setContentsMargins(12, 8, 12, 8)
+        notice_v.setSpacing(6)
+        self.obah_notice_rows = {}
+        for key in ("obah", "xrbinder"):
+            row_w = QWidget()
+            row_h = QHBoxLayout(row_w)
+            row_h.setContentsMargins(0, 0, 0, 0)
+            row_h.setSpacing(10)
+            lbl = QLabel()
+            lbl.setWordWrap(True)
+            row_h.addWidget(lbl, 1)
+            btn = QPushButton()
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(26)
+            row_h.addWidget(btn, 0, Qt.AlignVCenter)
+            notice_v.addWidget(row_w)
+            self.obah_notice_rows[key] = {"row": row_w, "label": lbl, "button": btn}
+        self.obah_notice.setVisible(False)
+        v.addWidget(self.obah_notice)
 
         self.obah_body = QWidget()
         self.obah_body.setVisible(False)
@@ -2128,6 +2247,28 @@ class Ui_MainWindow:
             combos.append(combo)
         self.combo_obah_game, self.combo_obah_controller, self.combo_obah_source = combos
 
+        # Action-Datei von Hand waehlen (wenn die Suche nichts findet)
+        small_css = """
+            QPushButton { background-color: #3b4252; color: #88c0d0; font-size: 11px;
+                          padding: 0px 10px; border-radius: 4px; border: none; }
+            QPushButton:hover { background-color: #4c566a; }
+            QPushButton:disabled { background-color: #2e3440; color: #4c566a; }
+        """
+        manifest_row = QHBoxLayout()
+        manifest_row.setSpacing(6)
+        self.btn_obah_pick_manifest = QPushButton(tr("obah_pick_manifest"))
+        self.btn_obah_pick_manifest.setToolTip(tr("obah_pick_manifest_tip"))
+        self.btn_obah_clear_manifest = QPushButton("✕")
+        self.btn_obah_clear_manifest.setToolTip(tr("obah_clear_manifest_tip"))
+        for b in (self.btn_obah_pick_manifest, self.btn_obah_clear_manifest):
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFixedHeight(28)
+            b.setStyleSheet(small_css)
+            b.setEnabled(False)
+            manifest_row.addWidget(b)
+        self.btn_obah_clear_manifest.setVisible(False)
+        grid.addLayout(manifest_row, 0, 3)
+
         self.lbl_obah_hint = QLabel("")
         self.lbl_obah_hint.setWordWrap(True)
         self.lbl_obah_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -2200,6 +2341,20 @@ class Ui_MainWindow:
         self.btn_obah_discard.setCursor(Qt.PointingHandCursor)
         self.btn_obah_discard.setStyleSheet(small_css)
         status_row.addWidget(self.btn_obah_discard)
+        # Nur bei OpenXR-Spielen (xrBinder): alle Umbelegungen zuruecknehmen
+        self.btn_xr_reset_all = QPushButton(tr("xrb_reset_all"))
+        self.btn_xr_reset_all.setToolTip(tr("xrb_reset_all_tip"))
+        self.btn_xr_reset_all.setCursor(Qt.PointingHandCursor)
+        self.btn_xr_reset_all.setStyleSheet(small_css)
+        self.btn_xr_reset_all.setVisible(False)
+        status_row.addWidget(self.btn_xr_reset_all)
+        # Nur bei OpenXR-Spielen ohne gemeldete Tasten (z. B. VRChat ueber xrizer)
+        self.btn_xr_template = QPushButton(tr("xrb_template"))
+        self.btn_xr_template.setToolTip(tr("xrb_template_tip"))
+        self.btn_xr_template.setCursor(Qt.PointingHandCursor)
+        self.btn_xr_template.setStyleSheet(small_css)
+        self.btn_xr_template.setVisible(False)
+        status_row.addWidget(self.btn_xr_template)
         # Speichern: Klick = Standardziel, Pfeil = Ziel waehlen (wie obahs Dialog)
         self.btn_obah_save = _QToolButton()
         self.btn_obah_save.setPopupMode(_QToolButton.MenuButtonPopup)
@@ -2274,6 +2429,14 @@ class Ui_MainWindow:
         ev.addWidget(self.obah_aux_body)
         v.addWidget(self.obah_editor)
         return panel
+
+    def ensure_tools_tab(self):
+        """Tools-Tab beim ersten Bedarf bauen. True = gerade eben gebaut."""
+        if self._tools_built:
+            return False
+        self._tools_built = True
+        self.setup_tools_tab()
+        return True
 
     def setup_tools_tab(self):
         outer = QVBoxLayout(self.tab_tools)

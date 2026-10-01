@@ -42,7 +42,7 @@ import webbrowser
 # scripts/bump_version.py haelt sie automatisch mit core/version.py gleich,
 # und der Smoke-Test bricht ab, falls beide auseinanderlaufen oder das Muster
 # mehr als einmal vorkommt.
-APP_VERSION = "v1.3.1"
+APP_VERSION = "v1.3.9"
 
 # Community-Links (Settings -> "Community & Updates").
 # HIER werden Discord und Ko-fi gepflegt — es gibt keine zweite Stelle im
@@ -93,6 +93,8 @@ from tabs.dashboard_mixin import (DashboardMixin,          # noqa: F401
 from tabs.games_mixin import GamesTabMixin
 from tabs.tools_mixin import ToolsTabMixin
 from tabs.controls_mixin import ControlsTabMixin
+from tabs.xr_controls_mixin import XrControlsMixin
+from tabs.autostart_profiles_mixin import AutostartProfilesMixin
 
 # Interne Importe (liegen im selben Ordner 'core')
 from install_worker import (InstallWorker, UpdateWorker, AppUpdateCheckWorker,
@@ -138,6 +140,16 @@ from logging_setup import get_logger, read_log_tail
 
 log = get_logger("main")
 
+
+
+# Tests (tests/conftest.py) setzen das, damit nicht jedes VRApp 1,5 s nach
+# dem Start GitHub fragt. Solche Threads liefen beim Testende sonst oft noch
+# -> "QThread: Destroyed while thread is still running" -> SIGABRT (Code 6).
+NO_NETCHECK_ENV = "YAKUDA_NO_STARTUP_NETCHECK"
+
+
+def startup_netcheck_disabled():
+    return os.environ.get(NO_NETCHECK_ENV, "").strip() not in ("", "0")
 
 
 class PackageCheckWorker(QThread):
@@ -200,6 +212,12 @@ class PackageCheckWorker(QThread):
                     upgradable.add(line.split("/")[0].split(":")[0])
             return installed, upgradable
 
+        if self.method == "flatpak":
+            # SteamOS: WiVRn nur als Flatpak. Ordner-Pruefung reicht, kein
+            # 'flatpak remote-ls' (das ginge ins Netz).
+            installed = {WIVRN_FLATPAK_ID} if venv.wivrn_flatpak_installed() else set()
+            return installed, set()
+
         if self.method == "native" or not self.method:
             return None, set()          # wird ueber shutil.which geprueft
 
@@ -256,7 +274,8 @@ class PackageCheckWorker(QThread):
         self.result_signal.emit(results, updates_available)
 
 
-class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMainWindow):
+class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, XrControlsMixin,
+            AutostartProfilesMixin, QMainWindow):
     """
     Hauptfenster.
 
@@ -267,6 +286,13 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
     """
     def __init__(self):
         super().__init__()
+        # Mausrad aendert keine Aufklapplisten mehr (scrollt die Seite)
+        from ui import no_wheel
+        no_wheel.install(QApplication.instance())
+        # Gespeichertes Design VOR dem Aufbau lesen: dann setzt ui_main das
+        # Anwendungs-Stylesheet gleich gefaerbt (und es kommt nach einem
+        # Neustart ueberhaupt zurueck — theme.load() wurde bisher nie gerufen).
+        theme.load()
         #loading initliserung
         self.is_loading = True
         # UI Instanziieren und anwenden
@@ -514,6 +540,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
 
     def check_app_update(self):
         """Startet den stillen Versions-Check im Hintergrund."""
+        if startup_netcheck_disabled():
+            return
         if self._app_update_check_worker is not None and self._app_update_check_worker.isRunning():
             return
         self._app_update_check_worker = AppUpdateCheckWorker(self.APP_VERSION)
@@ -1026,6 +1054,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         self.ui.btn_games_reset.clicked.connect(self.reset_games_list)
         self.ui.chk_stop_server_with_app.setChecked(self._stop_server_with_app)
         self.ui.chk_stop_server_with_app.toggled.connect(self.on_stop_server_with_app_toggled)
+        self.ui.btn_cli_setup.clicked.connect(self.setup_cli_commands)
+        self.ui.btn_cli_open.clicked.connect(self.switch_to_terminal_mode)
         self.ui.btn_games_db_update.clicked.connect(self.start_games_db_update)
         self._refresh_games_db_version()
         # Im Hintergrund prüfen, ob eine neuere Spiele-DB (games.json) vorliegt.
@@ -1121,6 +1151,7 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # Autostart Zeilen-Generierung
         self.ui.num_apps.returnPressed.connect(self.update_autostart_fields)
         self.ui.num_apps.editingFinished.connect(self.update_autostart_fields)
+        self.ui.btn_autostart_add_vr_row.clicked.connect(self._vr_add_row_clicked)
         # Manueller Reset des Einweg-Autostart-Timers
         self.ui.btn_autostart_reset.clicked.connect(self.reset_autostart_readiness)
         # Besen-Button: laufende Autostart-Apps sofort beenden
@@ -1145,9 +1176,34 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         stream_layout = QVBoxLayout(self.ui.tab_streaming)
         stream_layout.setContentsMargins(0, 0, 0, 0)
         self.streaming_settings = StreamingTab(self)
-        stream_layout.addWidget(self.streaming_settings)
+        # Scrollbar: seit den Autostart-Profilen ist der Tab laenger als
+        # ein kleines Fenster (oder das Fenster in WayVR) hoch ist.
+        from PySide6.QtWidgets import QScrollArea
+        stream_scroll = QScrollArea()
+        stream_scroll.setWidgetResizable(True)
+        stream_scroll.setFrameShape(QScrollArea.NoFrame)
+        # Wie der Dashboard-Scrollbereich: durchsichtig, sonst malt der
+        # Viewport die helle System-Farbe (und ein Hintergrundbild fehlt).
+        stream_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        stream_scroll.setWidget(self.streaming_settings)
+        stream_layout.addWidget(stream_scroll)
+        # Autostart-Profile (Bedingung „Spiel laeuft + Headset“) — eigene
+        # Gruppe oben im Streaming-Tab, siehe tabs/autostart_profiles_mixin.py.
+        self.setup_autostart_profiles()
 
-        # Tools Tab — Buttons verknüpfen (Dispatcher: Installieren/Aktualisieren/Löschen)
+        # Tools-Tab wird erst beim ersten Oeffnen gebaut (_ensure_tools_ui).
+        # Controls-Tab braucht beim Start nur die Tool-Daten, nicht die Karten.
+        self.setup_controls_tab_logic()
+
+    def _ensure_tools_ui(self):
+        """Tools-Tab bauen und verdrahten, falls noch nicht geschehen.
+
+        Aufrufen vor JEDEM Zugriff auf self.ui.tool_cards & Co. — beim Oeffnen
+        des Tabs und wenn der Controls-Tab etwas installiert.
+        """
+        if not self.ui.ensure_tools_tab():
+            return
+        # Buttons verknüpfen (Dispatcher: Installieren/Aktualisieren/Löschen)
         for key, card in self.ui.tool_cards.items():
             card["btn_install"].clicked.connect(
                 lambda checked=False, k=key: self.on_tool_action(k)
@@ -1160,8 +1216,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # Filterleiste erst hier aufbauen: sie liest die Kategorien aus den
         # fertig angelegten Karten.
         self.setup_tools_filter()
-        # Controls-Tab nutzt die Tool-Karten zum Installieren -> danach.
-        self.setup_controls_tab_logic()
+        # Frisch gebaute Widgets ins aktive Design faerben
+        theme.apply_to_tree(self.ui.tab_tools)
 
         # Settings Tab
         # HINWEIS: btn_vrchat_symlink wird NICHT mehr hier verbunden — der
@@ -1169,7 +1225,11 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # ausgeklappten VRChat-Bereich des Games-Tabs (siehe _build_game_detail).
 
     def get_wivrn_version(self):
-        # Immer nativ: Version direkt aus der wivrn-server-Binary lesen
+        # Nur-Flatpak: Version aus 'flatpak info' (ohne die Sandbox zu starten)
+        if venv.wivrn_uses_flatpak():
+            ver = venv.wivrn_flatpak_version()
+            return f"{ver} (Flatpak)" if ver else "Flatpak"
+        # Nativ: Version direkt aus der wivrn-server-Binary lesen
         try:
             res = subprocess.run(["wivrn-server", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=proc.DEFAULT_TIMEOUT)
             if res.returncode == 0:
@@ -1186,6 +1246,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
             return False
         if method in ("dnf", "native"):
             return shutil.which("wivrn-server") is not None
+        if method == "flatpak":
+            return venv.wivrn_flatpak_installed()
         # yay/paru: WiVRn/Monado-Pakete vorhanden?
         if not shutil.which(method):
             return False
@@ -1227,7 +1289,9 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # Die OpenVR-Auswahl kann sich ausserhalb dieses Tabs geaendert haben
         # (Runtime-Umschaltung, xrizer-Automatik, WiVRn-Dashboard).
         if index == 2: self.refresh_openvr_ui()
-        if index == 3: self.check_tools_status()
+        if index == 3:
+            self._ensure_tools_ui()
+            self.check_tools_status()
         if index == 4: self.on_games_tab_opened()
         if index == self.ui.pages.indexOf(self.ui.tab_controls):
             self.refresh_controls_status()
@@ -1270,7 +1334,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         QTimer.singleShot(1500, lambda: self.ui.btn_openxr_copy_content.setText(tr("openxr_copy_btn")))
 
     def on_language_changed(self, index):
-        lang = "en" if index == 0 else "de"
+        # Sprachcode steht als Daten am Eintrag (Liste aus locales/*.json).
+        lang = self.ui.combo_language.itemData(index) or "en"
         set_language(lang)
         self.apply_translations()
         data = load_saved_settings()
@@ -1296,6 +1361,10 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # 2) Streaming-Tab (eigenes Widget) ebenfalls neu übersetzen.
         if hasattr(self, 'streaming_settings') and hasattr(self.streaming_settings, 'retranslate'):
             self.streaming_settings.retranslate()
+
+        # Autostart-Profil-Tabs (eigene Widgets, nicht in retranslate_ui)
+        if hasattr(self, "autostart_profiles_retranslate"):
+            self.autostart_profiles_retranslate()
 
         # 3) Info-Text (Willkommen / Welcome)
         self._set_welcome_text()
@@ -1337,6 +1406,7 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
                     lbl.setText(tr("pkg_incomplete"))
 
         # Tool-Karten: Beschreibung neu setzen, Status/Buttons aus dem Cache rendern
+        # (leer, solange der Tools-Tab noch nicht gebaut ist)
         for key, card in self.ui.tool_cards.items():
             tool = all_tools.get(key, {})
             if "lbl_desc" in card:
@@ -1364,7 +1434,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
                 idx = combo.findData(prev)
                 if idx >= 0:
                     combo.setCurrentIndex(idx)
-        self.check_tools_status()
+        if self.ui.tool_cards:
+            self.check_tools_status()
 
     def _get_pictures_dir(self):
         """Ermittelt den lokalisierten Bilder-Ordner.
@@ -1554,19 +1625,17 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
 
             # Auch das Stylesheet der Anwendung: dort steht die Flaeche hinter
             # den Karten (QStackedWidget) sowie Dialoge, Menues und Tooltips.
+            # Mit Bild kommen ein paar Regeln dazu, damit nichts mehr
+            # undurchsichtig davorliegt. apply_to_app baut jedes Mal vom
+            # Original aus neu auf (kein Aufsummieren) und setzt nur, wenn
+            # sich etwas aendert — EIN Aufruf statt zwei.
             app = QApplication.instance()
-            theme.apply_to_app(app)
-            if visible and app is not None:
-                # Mit Bild kommen ein paar Regeln dazu, damit nichts mehr
-                # undurchsichtig davorliegt. apply_to_app baut jedes Mal vom
-                # Original aus neu auf — Anhaengen kann sich also nicht
-                # aufsummieren.
-                app.setStyleSheet(app.styleSheet() + "\n" + theme.IMAGE_SURFACES_CSS)
+            theme.apply_to_app(app, theme.IMAGE_SURFACES_CSS if visible else "")
 
             # Der Seitenstapel ist deckend eingefaerbt und laege sonst UEBER
             # dem Bild. Nur mit Bild durchsichtig schalten, damit ohne Bild
             # alles bleibt, wie es war.
-            self.ui.pages.setStyleSheet(theme.stack_tint_css() if visible else "")
+            theme.set_style_if_changed(self.ui.pages, theme.stack_tint_css() if visible else "")
             self._apply_column_tint(visible)
 
             log.debug("[Theme] %s Stylesheets eingefaerbt (%s, Bild: %s)", count,
@@ -1607,7 +1676,7 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
             css = theme.tint(base, allow_opacity=False)
             if with_image:
                 css = theme.make_translucent(css, theme.COLUMN_TINT)
-            widget.setStyleSheet(css)
+            theme.set_style_if_changed(widget, css)
 
     def _package_groups_for(self, method):
         """Welche Status-Zeilen je Methode?"""
@@ -1626,6 +1695,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
             return groups
         if method == "native":
             return {"WiVRn": ["wivrn-server"]}
+        if method == "flatpak":
+            return {"WiVRn (Flatpak)": [WIVRN_FLATPAK_ID]}
         if not method:
             # Ubuntu/Debian: keine Methode -> nur den WiVRn-Status zeigen
             return {"WiVRn": ["wivrn-server"]}
@@ -1743,13 +1814,30 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # Laeuft bereits eine Pruefung, diese zuerst beenden — sonst schreiben
         # zwei Threads in dieselben Labels (z. B. bei schnellem Wechsel der
         # Installationsmethode).
+        # Frueher: worker.wait(2000) — das fror beim Start die Oberflaeche
+        # bis zu 2 s ein (die Pruefung lief direkt zweimal: __init__ und
+        # Wechsel auf Tab 0). Jetzt: vormerken und nach dem Ende neu starten.
         worker = getattr(self, "_pkgcheck_worker", None)
         if worker is not None and worker.isRunning():
-            worker.wait(2000)
+            self._pkgcheck_again = True
+            return
 
+        self._pkgcheck_again = False
         self._pkgcheck_worker = PackageCheckWorker(method, groups)
         self._pkgcheck_worker.result_signal.connect(self._on_package_check_done)
+        self._pkgcheck_worker.finished.connect(self._on_package_check_finished)
         self._pkgcheck_worker.start()
+
+    def _on_package_check_finished(self):
+        """Thread ist fertig — lag inzwischen eine neue Anfrage vor, jetzt pruefen.
+        Nicht mehr beim Beenden: closeEvent hat schon auf die Worker gewartet,
+        ein frisch gestarteter Thread wuerde den Prozess abbrechen (SIGABRT)."""
+        if getattr(self, "_exit_cleanup_done", False):
+            self._pkgcheck_again = False
+            return
+        if getattr(self, "_pkgcheck_again", False):
+            self._pkgcheck_again = False
+            self.check_system_packages()
 
     def _on_package_check_done(self, results, updates_available):
         """Ergebnis des Hintergrund-Threads in die Oberflaeche uebertragen."""
@@ -1958,7 +2046,8 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         self._last_install_method = "flatpak"
         self._last_install_pkgs = []          # Nachkontrolle laeuft ueber flatpak info
         self._xrizer_github_after_install = False
-        self.worker = InstallWorker([WIVRN_FLATPAK_ID], helper="flatpak")
+        self.worker = InstallWorker([WIVRN_FLATPAK_ID], helper="flatpak",
+                                    flatpak_user=appimg.is_steamos())
         self.worker.status_signal.connect(self.ui.lbl_worker_status.setText)
         self.worker.finished_signal.connect(self.on_installation_finished)
         self.worker.start()
@@ -2172,6 +2261,13 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
 
         if method == "native":
             QMessageBox.information(self, tr("native_install_title"), tr("native_install_text"))
+            return
+        if method == "flatpak":
+            # SteamOS: WiVRn kommt ausschliesslich als Flatpak.
+            if venv.wivrn_flatpak_installed():
+                self.ui.lbl_worker_status.setText(tr("install_check_done"))
+            else:
+                self.install_wivrn_flatpak()
             return
         if not method:
             self.ui.lbl_worker_status.setText(tr("install_no_method"))
@@ -2495,6 +2591,13 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
                                    fw.manual_commands(kind))
 
     def update_autostart_fields(self):
+        """Zeilen des VR-Tabs an ``num_apps`` angleichen.
+
+        ``num_apps`` ist seit den Profil-Tabs unsichtbar und nur noch der
+        Zaehler fuer config.json (``autostart_count`` — den liest auch der
+        Terminal-Modus). Bedient wird wie in den Profilen: „+ Programm“
+        haengt eine Zeile an, ✕ entfernt genau diese Zeile.
+        """
         try:
             target_count = int(self.ui.num_apps.text())
             if target_count < 0: target_count = 0
@@ -2503,68 +2606,92 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
             target_count = 1
             self.ui.num_apps.setText("1")
 
-        current_count = len(self.autostart_rows)
-
-        if target_count > current_count:
-            for i in range(current_count + 1, target_count + 1):
-                row_layout = QHBoxLayout()
-                lbl = QLabel(f"Programm {i}:")
-                lbl.setFixedWidth(80)
-                combo = QComboBox()
-                combo.addItems(["Custom Path", "CMD"])
-                combo.setFixedWidth(110)
-                inp = QLineEdit("")
-                btn = QPushButton("Browse...")
-                btn.setFixedWidth(80)
-
-                # Autovervollstaendigung im CMD-Modus: alle ueber den
-                # Tools-Tab installierten Startbefehle plus was sonst im PATH
-                # liegt. Popup- statt Inline-Ergaenzung, weil Inline beim
-                # Tippen eigener Befehle staendig dazwischenfunkt.
-                completer = QCompleter(self._autostart_command_pool(), self)
-                completer.setCaseSensitivity(Qt.CaseInsensitive)
-                completer.setFilterMode(Qt.MatchContains)
-                completer.setCompletionMode(QCompleter.PopupCompletion)
-                inp.setCompleter(completer)
-
-                # Debug-Checkbox
-                from PySide6.QtWidgets import QCheckBox
-                chk_debug = QCheckBox("Debug")
-                chk_debug.setToolTip(tr("autostart_debug_tip"))
-                chk_debug.setFixedWidth(65)
-                chk_debug.setStyleSheet("color: #ebcb8b; font-size: 11px;")
-
-                combo.currentTextChanged.connect(
-                    lambda text, le=inp, bb=btn: self._autostart_mode_changed(text, le, bb))
-                inp.textChanged.connect(self.trigger_auto_save)
-                chk_debug.stateChanged.connect(self.trigger_auto_save)
-                btn.clicked.connect(
-                    lambda checked, le=inp, cb=combo: self._autostart_browse(le, cb))
-
-                row_layout.addWidget(lbl)
-                row_layout.addWidget(combo)
-                row_layout.addWidget(inp)
-                row_layout.addWidget(btn)
-                row_layout.addWidget(chk_debug)
-                self.ui.autostart_container_layout.addLayout(row_layout)
-                self.autostart_rows.append({
-                    "label": lbl, "combo": combo, "input": inp,
-                    "btn": btn, "chk_debug": chk_debug, "layout": row_layout,
-                    "completer": completer,
-                })
-                # Beschriftung/Zustand einmal passend zum Startmodus setzen.
-                self._autostart_mode_changed(combo.currentText(), inp, btn)
-        elif target_count < current_count:
-            for _ in range(current_count - target_count):
-                row = self.autostart_rows.pop()
-                self.ui.autostart_container_layout.removeItem(row['layout'])
-                row['combo'].deleteLater()
-                row['input'].deleteLater()
-                row['btn'].deleteLater()
-                row['label'].deleteLater()
-                row['chk_debug'].deleteLater()
+        while len(self.autostart_rows) < target_count:
+            self._vr_add_row()
+        while len(self.autostart_rows) > target_count:
+            self._vr_delete_row_widgets(self.autostart_rows.pop())
 
         if not self.ui.num_apps.signalsBlocked(): self.trigger_auto_save()
+
+    def _vr_add_row(self):
+        """Eine Programmzeile im VR-Tab — gleiches Aussehen wie in den Profilen."""
+        from PySide6.QtWidgets import QCheckBox
+        row_w = QWidget()
+        row_layout = QHBoxLayout(row_w)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        combo = QComboBox()
+        combo.addItems(["Custom Path", "CMD"])
+        combo.setFixedWidth(110)
+        inp = QLineEdit("")
+        btn = QPushButton("Browse...")
+        btn.setMinimumWidth(95)
+
+        # Autovervollstaendigung im CMD-Modus: alle ueber den
+        # Tools-Tab installierten Startbefehle plus was sonst im PATH
+        # liegt. Popup- statt Inline-Ergaenzung, weil Inline beim
+        # Tippen eigener Befehle staendig dazwischenfunkt.
+        completer = QCompleter(self._autostart_command_pool(), self)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        completer.setCompletionMode(QCompleter.PopupCompletion)
+        inp.setCompleter(completer)
+
+        chk_debug = QCheckBox("Debug")
+        chk_debug.setToolTip(tr("autostart_debug_tip"))
+        chk_debug.setFixedWidth(65)
+        chk_debug.setStyleSheet("color: #ebcb8b; font-size: 11px;")
+
+        btn_del = QPushButton("✕")
+        btn_del.setFixedWidth(30)
+        btn_del.setToolTip(tr("autostart_profile_row_del_tip"))
+        btn_del.setStyleSheet(
+            "QPushButton { background-color:#2e3440; color:#bf616a; border:1px solid #4c566a;"
+            " font-weight:bold; padding:4px; border-radius:4px; }"
+            "QPushButton:hover { background-color:#bf616a; color:white; border-color:#bf616a; }")
+
+        row = {"combo": combo, "input": inp, "btn": btn, "chk_debug": chk_debug,
+               "btn_del": btn_del, "widget": row_w, "completer": completer}
+
+        combo.currentTextChanged.connect(
+            lambda text, le=inp, bb=btn: self._autostart_mode_changed(text, le, bb))
+        combo.currentTextChanged.connect(self.trigger_auto_save)
+        inp.textChanged.connect(self.trigger_auto_save)
+        chk_debug.stateChanged.connect(self.trigger_auto_save)
+        btn.clicked.connect(
+            lambda checked, le=inp, cb=combo: self._autostart_browse(le, cb))
+        btn_del.clicked.connect(lambda: self._vr_remove_row(row))
+
+        for w in (combo, inp, btn, chk_debug, btn_del):
+            row_layout.addWidget(w)
+        row_layout.setStretch(1, 1)
+        self.ui.autostart_container_layout.addWidget(row_w)
+        self.autostart_rows.append(row)
+        # Beschriftung/Zustand einmal passend zum Startmodus setzen.
+        self._autostart_mode_changed(combo.currentText(), inp, btn)
+        return row
+
+    @staticmethod
+    def _vr_delete_row_widgets(row):
+        row["widget"].setParent(None)
+        row["widget"].deleteLater()
+
+    def _vr_add_row_clicked(self):
+        """„+ Programm“ im VR-Tab."""
+        if len(self.autostart_rows) >= 10:
+            return
+        self._vr_add_row()
+        self.ui.num_apps.setText(str(len(self.autostart_rows)))
+        self.trigger_auto_save()
+
+    def _vr_remove_row(self, row):
+        """✕ an einer Zeile im VR-Tab — entfernt genau diese Zeile."""
+        try:
+            self.autostart_rows.remove(row)
+        except ValueError:
+            return
+        self._vr_delete_row_widgets(row)
+        self.ui.num_apps.setText(str(len(self.autostart_rows)))
+        self.trigger_auto_save()
 
     def _autostart_mode_changed(self, mode, line_edit, button):
         """Schaltet eine Autostart-Zeile zwischen Pfad- und Befehlsmodus um.
@@ -2756,7 +2883,10 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         lang = data.get("language", "en")
         set_language(lang)
         self.ui.combo_language.blockSignals(True)
-        self.ui.combo_language.setCurrentIndex(0 if lang == "en" else 1)
+        idx = self.ui.combo_language.findData(lang)
+        if idx < 0:
+            idx = self.ui.combo_language.findData("en")
+        self.ui.combo_language.setCurrentIndex(max(idx, 0))
         self.ui.combo_language.blockSignals(False)
         self.apply_translations()
 
@@ -2822,33 +2952,11 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
     def is_headset_connected(self):
         """
         Prüft, ob AKTUELL ein Headset mit dem WiVRn-Server verbunden ist.
-        Nutzt nur LIVE-Signale, die beim Trennen wieder verschwinden – daher
-        NICHT die "Client connected"-Logzeile (die bleibt die ganze Session stehen
-        und würde ein Erkennen der Trennung unmöglich machen).
+        Die Pruefung selbst steht Qt-frei in core/autostart_runner.py — der
+        Terminal-Modus braucht genau dieselbe.
         """
-        # Signal A: WiVRn legt beim Verbinden ein virtuelles Audiogerät "WiVRn"
-        # an und entfernt es beim Trennen (dokumentiertes Verhalten).
-        try:
-            for kind in ("sinks", "sources"):
-                res = subprocess.run(["pactl", "list", "short", kind],
-                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     text=True, timeout=2)
-                if "wivrn" in res.stdout.lower():
-                    return True
-        except Exception as exc:
-            log.debug("is_headset_connected: ignoriert — %s", exc)
-
-        # Signal B: aktive (ESTABLISHED) TCP-Verbindung auf dem WiVRn-Port 9757.
-        try:
-            res = subprocess.run(["ss", "-Htan"], stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL, text=True, timeout=2)
-            for line in res.stdout.splitlines():
-                if "ESTAB" in line and ":9757" in line:
-                    return True
-        except Exception as exc:
-            log.debug("is_headset_connected: ignoriert — %s", exc)
-
-        return False
+        import autostart_runner
+        return autostart_runner.headset_connected()
 
     def _poll_headset_for_autostart(self):
         """
@@ -2925,6 +3033,9 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         Sollen die Apps später wieder kommen, einfach 'Timer zurücksetzen'.
         """
         self.stop_autostart_apps()
+        # Auch die Programme der Profil-Tabs. Die Profile bleiben dabei
+        # „ausgeloest“ — sie starten erst wieder, wenn ihr Ausloeser neu startet.
+        self.kill_profile_apps()
         self._headset_connected = False   # keine aktive App-Sitzung mehr
         log.info("[Autostart] Laufende Programme manuell beendet (Besen-Button).")
 
@@ -2939,28 +3050,38 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # Eventuelle Reste zuerst beenden, damit nichts doppelt läuft.
         self.stop_autostart_apps()
         for row in self.autostart_rows:
-            cmd = row["input"].text().strip()
-            if not cmd:
-                continue
-            try:
-                if row["chk_debug"].isChecked():
-                    # Mit sichtbarem Terminal starten
-                    from install_worker import find_terminal
-                    terminal, flags = find_terminal()
-                    if terminal:
-                        p = subprocess.Popen(
-                            [terminal] + flags + ["bash", "-c", f"{cmd}; echo ''; echo '[Debug] Prozess beendet. Fenster schließen zum Beenden.'; read"],
-                            start_new_session=True
-                        )
-                    else:
-                        p = subprocess.Popen(cmd, shell=True, start_new_session=True)
-                else:
-                    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.DEVNULL, start_new_session=True)
+            p = self._spawn_autostart_cmd(row["input"].text(), row["chk_debug"].isChecked())
+            if p is not None:
                 self._autostart_procs.append(p)
-            except Exception as e:
-                log.warning(f"[Autostart] Konnte '{cmd}' nicht starten: {e}")
         self._sync_exit_guard()
+        if hasattr(self, "_refresh_tab_dots"):
+            self._refresh_tab_dots()
+
+    @staticmethod
+    def _spawn_autostart_cmd(cmd, debug=False):
+        """Einen Autostart-Befehl in eigener Sitzung starten (VR-Tab und Profile).
+
+        Gibt den Popen zurueck oder None (leer / Fehler).
+        """
+        cmd = (cmd or "").strip()
+        if not cmd:
+            return None
+        try:
+            if debug:
+                # Mit sichtbarem Terminal starten
+                from install_worker import find_terminal
+                terminal, flags = find_terminal()
+                if terminal:
+                    return subprocess.Popen(
+                        [terminal] + flags + ["bash", "-c", f"{cmd}; echo ''; echo '[Debug] Prozess beendet. Fenster schließen zum Beenden.'; read"],
+                        start_new_session=True
+                    )
+                return subprocess.Popen(cmd, shell=True, start_new_session=True)
+            return subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, start_new_session=True)
+        except Exception as e:
+            log.warning(f"[Autostart] Konnte '{cmd}' nicht starten: {e}")
+            return None
 
     # ------------------------------------------------------------------ #
     #  Eigene Kill-Befehle (Settings, ganz unten)
@@ -3377,14 +3498,11 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # ausfuehren muss, wenn die App hart beendet wurde.
         exit_guard.run_kill_commands(entries)
 
-    def stop_autostart_apps(self):
-        """Beendet alle zuvor gestarteten Autostart-Programme (samt Kindprozessen)."""
-        # Erst zusätzliche, benutzerdefinierte Kill-Befehle laufen lassen
-        # (Sonderfälle wie VRCX/Electron, die den normalen Kill überleben).
-        # Der normale Kill unten läuft anschließend wie gewohnt weiter.
-        self._run_custom_kill_commands()
+    @staticmethod
+    def _kill_proc_groups(procs):
+        """Prozessgruppen beenden: SIGTERM, kurz warten, notfalls SIGKILL."""
         import signal as _signal
-        for p in self._autostart_procs:
+        for p in procs:
             try:
                 if p.poll() is not None:
                     continue  # läuft nicht mehr
@@ -3394,9 +3512,9 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
                 except Exception:
                     p.terminate()
             except Exception as exc:
-                log.debug("stop_autostart_apps: ignoriert — %s", exc)
+                log.debug("_kill_proc_groups: ignoriert — %s", exc)
         # kurz warten und notfalls hart beenden
-        for p in self._autostart_procs:
+        for p in procs:
             try:
                 p.wait(timeout=3)
             except Exception:
@@ -3406,9 +3524,33 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
                     try:
                         p.kill()
                     except Exception as exc:
-                        log.debug("stop_autostart_apps: ignoriert — %s", exc)
+                        log.debug("_kill_proc_groups: ignoriert — %s", exc)
+
+    def stop_autostart_apps(self):
+        """Beendet alle zuvor gestarteten Autostart-Programme (samt Kindprozessen)."""
+        # Erst zusätzliche, benutzerdefinierte Kill-Befehle laufen lassen
+        # (Sonderfälle wie VRCX/Electron, die den normalen Kill überleben).
+        # Der normale Kill unten läuft anschließend wie gewohnt weiter.
+        self._run_custom_kill_commands()
+        self._kill_proc_groups(self._autostart_procs)
         self._autostart_procs = []
+        # Auch was der Terminal-Modus gestartet hat (YC-*), samt wartendem
+        # Hintergrund-Waechter — sonst liefe es doppelt, sobald die
+        # Oberflaeche selbst wieder startet.
+        try:
+            import autostart_runner
+            autostart_runner.stop_watcher()
+            groups = autostart_runner.running_apps()
+            if groups:
+                exit_guard.stop_groups([(g, s) for g, s in groups])
+                state = autostart_runner.load_state()
+                state["apps"] = []
+                autostart_runner.save_state(state)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("stop_autostart_apps (Terminal-Modus): ignoriert — %s", exc)
         self._sync_exit_guard()
+        if hasattr(self, "_refresh_tab_dots"):
+            self._refresh_tab_dots()
 
     def start_wivrn_server(self):
         current_settings = load_saved_settings()
@@ -3437,19 +3579,23 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # Muss beim START gesetzt werden: Vulkan sucht sich das Geraet beim
         # Hochfahren des Servers aus, spaeter ist nichts mehr zu machen.
         import gpu_select
+        gpu_extra = gpu_select.env_for_id(current_settings.get("gpu_device", ""))
         server_env = gpu_select.apply_to(os.environ, current_settings.get("gpu_device", ""))
+        # Nativ: "wivrn-server". Nur-Flatpak (SteamOS): "flatpak run
+        # --command=wivrn-server ..." — die GPU-Wahl dann per --env.
+        server_argv = venv.wivrn_server_argv(gpu_extra)
 
         try:
             os.makedirs(os.path.dirname(self._server_log_path), exist_ok=True)
             self._server_log_fh = open(self._server_log_path, "w")
             self.server_process = subprocess.Popen(
-                ["wivrn-server"], stdout=self._server_log_fh, stderr=subprocess.STDOUT,
+                server_argv, stdout=self._server_log_fh, stderr=subprocess.STDOUT,
                 env=server_env)
         except Exception as e:
             log.warning(f"[Server] Konnte Logdatei nicht anlegen ({e}) – starte ohne Log.")
             self._server_log_fh = None
             self.server_process = subprocess.Popen(
-                ["wivrn-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                server_argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 env=server_env)
 
         log.info("[Autostart] Server gestartet – warte auf Headset-Verbindung, bevor Programme starten...")
@@ -3608,6 +3754,95 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
             log.warning("'Server mit der App beenden' konnte nicht gespeichert werden.")
         self._sync_exit_guard()
 
+    # ------------------------------------------------------------------ #
+    #  Terminal-Modus (core/cli.py, core/cli_install.py)
+    # ------------------------------------------------------------------ #
+    def setup_cli_commands(self):
+        """Knopf 'Befehle einrichten': YC-* passend zur Installationsart."""
+        import cli_install
+        try:
+            res = cli_install.setup_commands()
+        except OSError as exc:
+            log.warning("CLI-Befehle: %s", exc)
+            QMessageBox.warning(self, tr("cli_group"),
+                                tr("cli_setup_failed").format(error=exc))
+            return
+        if res["system"]:
+            kind = "AUR" if res["kind"] == "aur" else "curl"
+            QMessageBox.information(self, tr("cli_group"),
+                                    tr("cli_setup_system").format(kind=kind))
+            return
+        parts = [tr("cli_setup_done").format(dir=res["dir"],
+                                             names="  ".join(res["written"]))]
+        if res["skipped"]:
+            parts.append(tr("cli_setup_skipped").format(names=", ".join(res["skipped"])))
+        if not res["path_ok"]:
+            parts.append(tr("cli_setup_path").format(dir=res["dir"]))
+        if res["kind"] == "appimage":
+            parts.append(tr("cli_setup_appimage"))
+        QMessageBox.information(self, tr("cli_group"), "\n\n".join(parts))
+
+    def switch_to_terminal_mode(self):
+        """
+        Knopf 'Im Terminal starten': Terminal-Menue oeffnen, Oberflaeche zu.
+
+        Der Server soll dabei WEITERLAUFEN — wer umschaltet, ist oft gerade
+        in VR. Deshalb wird "Server mit der App beenden" nur fuer dieses eine
+        Schliessen ausgesetzt (nicht gespeichert).
+        """
+        import cli_install
+        answer = QMessageBox.question(self, tr("cli_group"), tr("cli_open_confirm"),
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if answer != QMessageBox.Yes:
+            return
+        if not cli_install.open_terminal():
+            import shlex
+            QMessageBox.warning(self, tr("cli_group"), tr("cli_no_terminal").format(
+                cmd=shlex.join(cli_install.cli_argv())))
+            return
+        self._stop_server_with_app = False
+        self._handoff_autostart_to_cli()
+        self._sync_exit_guard()
+        self.close()
+
+    def _handoff_autostart_to_cli(self):
+        """
+        Autostart an den Terminal-Modus uebergeben:
+          * laufende Programme merkt sich der Terminal-Modus, damit
+            YC-killapps sie spaeter schliessen kann
+          * wartet der Timer noch aufs Headset, uebernimmt das der
+            Hintergrund-Waechter (core/autostart_runner.py)
+        Die Programme selbst laufen weiter — sie stecken in eigenen Sitzungen.
+        """
+        import autostart_runner
+        import cli_install
+        try:
+            pids = [p.pid for p in self._autostart_procs if p.poll() is None]
+            if pids:
+                autostart_runner.remember_apps(pids)
+            if self.autostart_timer.isActive() and wivrn_server.is_running(self.server_process):
+                self.autostart_timer.stop()
+                env = dict(os.environ)
+                if cli_install.install_kind() == "appimage":
+                    for key in ("PYTHONPATH", "PYTHONHOME", "LD_LIBRARY_PATH"):
+                        env.pop(key, None)
+                autostart_runner.arm(load_saved_settings(),
+                                     cli_install.cli_argv("_autostart-watch"), env)
+            # Die Oberflaeche soll die Programme beim Schliessen NICHT mehr
+            # beenden — sie gehoeren jetzt dem Terminal-Modus.
+            self._autostart_procs = []
+        except Exception as exc:  # noqa: BLE001 — Umschalten darf daran nicht scheitern
+            log.warning("Autostart-Uebergabe an den Terminal-Modus: %s", exc)
+        # Profil-Tabs: laufende Programme + Ueberwachung ebenfalls abgeben.
+        try:
+            env = dict(os.environ)
+            if cli_install.install_kind() == "appimage":
+                for key in ("PYTHONPATH", "PYTHONHOME", "LD_LIBRARY_PATH"):
+                    env.pop(key, None)
+            self.profiles_handoff_to_cli(cli_install.cli_argv("_profile-watch"), env)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Profil-Uebergabe an den Terminal-Modus: %s", exc)
+
     def _exit_stop_wanted(self):
         """Soll beim Ende der App der Server gestoppt werden?"""
         if exit_guard.disabled_by_env() or not getattr(self, "_stop_server_with_app", False):
@@ -3736,6 +3971,7 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         # einen frischen Worker starten, auf den niemand mehr wartet.
         self.usb_poll_timer.stop()
         self.autostart_timer.stop()
+        self.stop_profile_watch()
         # Auch die Nachschau beim Server-Beenden: laeuft sie noch, wuerde ihr
         # naechster Tick auf ein halb abgeraeumtes Fenster zugreifen.
         self._shutdown_timer.stop()
@@ -3746,6 +3982,14 @@ class VRApp(DashboardMixin, GamesTabMixin, ToolsTabMixin, ControlsTabMixin, QMai
         if self._exit_stop_wanted():
             self._stop_server_for_exit()
         self._server_stopping = False
+
+        # xrBinder-Karte im Controls-Tab: eigener IPC-Thread
+        panel = getattr(self.ui, "xrbinder_card", None)
+        if panel is not None:
+            try:
+                panel.shutdown()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("closeEvent (xrbinder): ignoriert — %s", exc)
 
         for name in self._BACKGROUND_WORKERS:
             worker = getattr(self, name, None)

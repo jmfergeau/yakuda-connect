@@ -1,5 +1,264 @@
 # Changelog - Yakuda Connect
 
+### 🚀 v1.3.9 — 2026-09-29
+
+#### 🇩🇪 Deutsch
+
+* **appiamge fix berehtigung**
+
+#### 🇬🇧 English
+
+* **appiamge fix permissions**.
+
+### 🚀 v1.3.8 — 2026-09-26
+
+#### 🇩🇪 Deutsch
+
+* **Fix: Autostart-Profile mit gleichem Auslöser starteten alle gleichzeitig.** Hatten zwei Profile denselben Auslöser (z. B. zwei VRChat-Setups mit unterschiedlichen DCB-Profilen), liefen beim Spielstart beide los – das DCB startete doppelt und meldete einen Fehler. Jetzt gilt: **pro Auslöser ist nur ein Profil aktiv.** Schaltet man bei einem Profil den Timer ein, geht der Timer der anderen Profile mit demselben Auslöser aus (wie ein Radio-Knopf), deren laufende Programme werden beendet. Das gilt auch, wenn man den Auslöser ändert (Eingabe fertig, „Laufende…“, „🎮 Games“). Als gleich gelten z. B. `VRChat` und `VRChat.exe` bzw. dieselbe `[AppId=…]`.
+* Das abgeschaltete Profil zeigt in der Statuszeile „Aus — Profil ‚X‘ nutzt denselben Auslöser …“ (neuer Text `autostart_profile_status_dup`, DE/EN).
+* Absicherung in GUI **und** Terminal-Modus (`_profile-watch`): auch bei alten Configs mit Doppel-Einträgen startet nur das erste aktive Profil. Logik: `autostart_profiles.trigger_key()` / `blocked_by()`, ohne Qt.
+* README: Hinweis bei den Autostart-Profilen.
+* Neue Tests in `tests/test_autostart_profiles.py` (Engine, GUI, Terminal-Modus).
+
+#### 🇬🇧 English
+
+* **Fix: autostart profiles with the same trigger all started at once.** If two profiles had the same trigger (e.g. two VRChat setups with different DCB profiles), both launched when the game started – DCB ran twice and reported an error. Now **only one profile per trigger is active.** Turning on a profile's timer turns off the timer of other profiles with the same trigger (like a radio button) and closes their running programs. The same applies when the trigger is changed (typing finished, “Running…”, “🎮 Games”). `VRChat` and `VRChat.exe`, or the same `[AppId=…]`, count as the same trigger.
+* The profile that was turned off shows “Off — profile ‘X’ uses the same trigger …” in its status line (new text `autostart_profile_status_dup`, DE/EN).
+* Safeguard in the GUI **and** terminal mode (`_profile-watch`): even with old configs that contain duplicates, only the first active profile starts. Logic: `autostart_profiles.trigger_key()` / `blocked_by()`, no Qt.
+* README: note in the autostart profiles entry.
+* New tests in `tests/test_autostart_profiles.py` (engine, GUI, terminal mode).
+
+### 🚀 v1.3.7 — 2026-09-24
+
+#### 🇩🇪 Deutsch
+
+* **Neu: „🧩 OpenXR-Vorlage verwenden“** (Controls-Tab, OpenXR-Spiele). Meldet ein Spiel seine Funktionen, aber keine einzige Taste (alle Karten „nichts belegt“, z. B. VRChat über xrizer), erscheint der Knopf samt Hinweis. Ein Klick legt eine übliche Standardbelegung als normale Umbelegungen an: erst über Tastennamen im Aktionsnamen (`oculustouch_left_x_click` → X, „Thumbstick X“ → Stick-X-Achse), sonst über die Bedeutung (Jump → A, Use → Trigger, Grab → Griff, Move → linker Stick, Turn/Look → rechter Stick, Menu → Menü links, Mic → Y, Crouch → Stick-Klick rechts). Die System-Taste rechts bleibt frei (bei Quest reserviert). Index nimmt A/B statt X/Y, Vive das Trackpad statt des Sticks. Erst nach „Speichern“ aktiv, „Verwerfen“ nimmt alles zurück; die Statuszeile zeigt „Vorlage: n von m Funktionen zugeordnet“. Logik: `xr_bindings.template_mappings()` / `template_offered()`, ohne Qt.
+* **Versionsprüfung überarbeitet** (`scripts/bump_version.py`). `--check` prüft jetzt zusätzlich `packaging/aur/.SRCINFO` (pkgver, pkgrel, source-Zeile passend zum Tag), den Versions-Badge in `README.md` und, ob CHANGELOG.md und HIGHLIGHTS.md die aktuelle Version als **obersten** Block mit Datum `JJJJ-MM-TT` haben. Ein leerer Block ist beim normalen `--check` nur ein Hinweis, mit `--expect` (Release) ein Fehler. Beim Setzen einer Version werden `.SRCINFO` und Badge mitgezogen; in CHANGELOG/HIGHLIGHTS kommt **nur** die Überschrift `### 🚀 vX.Y.Z — Datum` (Text schreibt der Autor, `--date` für ein anderes Datum).
+* **Neu: `packaging/aur/.SRCINFO`** im Projekt (aus der PKGBUILD erzeugt, makepkg-Format).
+* **Neu: `ARCHITEKTUR.md`** — welcher Tab seine Logik wo hat, welche Datei was macht, Regeln (Texte, Config, Pfade, `proc.run`), Datenpfade, Release-Ablauf und eine Tabelle „Welche Dateien für welche Änderung?“. In der README verlinkt.
+* README: Eintrag zur OpenXR-Vorlage.
+* Neue Tests: `tests/test_bump_version.py`, `tests/test_xr_template_gui.py`, Vorlage-Tests in `tests/test_xr_bindings.py`.
+* **pytest endete manchmal mit Signal 6 (SIGABRT) trotz „alles bestanden“.** Jedes `VRApp` in den Tests fragte 1,5 s nach dem Start GitHub nach App- und Spiele-DB-Updates (`AppUpdateCheckWorker`, `GamesDbWorker`). Liefen diese Threads beim Testende noch, brach Qt beim Beenden ab. Jetzt setzt `tests/conftest.py` `YAKUDA_NO_STARTUP_NETCHECK=1` (keine Update-Checks beim Start, `core/main.py`/`games_mixin.py`) und wartet am Ende auf alle noch laufenden QThreads.
+
+#### 🇬🇧 English
+
+* **New: “🧩 Use OpenXR template”** (Controls tab, OpenXR games). If a game reports its functions but not a single button (every card “nothing bound”, e.g. VRChat via xrizer), the button appears together with a hint. One click creates a common default layout as normal remaps: first by button names in the action name (`oculustouch_left_x_click` → X, “Thumbstick X” → stick X axis), otherwise by meaning (Jump → A, Use → trigger, Grab → grip, Move → left stick, Turn/Look → right stick, Menu → menu left, Mic → Y, Crouch → right stick click). The right system button stays free (reserved on Quest). Index uses A/B instead of X/Y, Vive the trackpad instead of the stick. Only active after “Save”, “Discard” undoes everything; the status line shows “Template: n of m functions assigned”. Logic: `xr_bindings.template_mappings()` / `template_offered()`, no Qt.
+* **Version check reworked** (`scripts/bump_version.py`). `--check` now also verifies `packaging/aur/.SRCINFO` (pkgver, pkgrel, source line matching the tag), the version badge in `README.md`, and that CHANGELOG.md and HIGHLIGHTS.md have the current version as the **top** block with a `YYYY-MM-DD` date. An empty block is only a hint with a plain `--check`, an error with `--expect` (release). Setting a version also updates `.SRCINFO` and the badge; CHANGELOG/HIGHLIGHTS only get the heading `### 🚀 vX.Y.Z — date` (the author writes the text, `--date` for another date).
+* **New: `packaging/aur/.SRCINFO`** in the project (generated from the PKGBUILD, makepkg format).
+* **New: `ARCHITEKTUR.md`** (German) — where each tab keeps its logic, what each file does, rules (texts, config, paths, `proc.run`), data paths, release steps and a table “which files for which change?”. Linked from the README.
+* README: entry for the OpenXR template.
+* New tests: `tests/test_bump_version.py`, `tests/test_xr_template_gui.py`, template tests in `tests/test_xr_bindings.py`.
+* **pytest sometimes ended with signal 6 (SIGABRT) despite “all passed”.** Every `VRApp` in the tests asked GitHub for app and game-DB updates 1.5 s after start (`AppUpdateCheckWorker`, `GamesDbWorker`). If those threads were still running when the tests ended, Qt aborted on exit. Now `tests/conftest.py` sets `YAKUDA_NO_STARTUP_NETCHECK=1` (no update checks on start, `core/main.py`/`games_mixin.py`) and waits for every still-running QThread at the end.
+
+### 🚀 v1.3.6 — 2026-09-23
+
+#### 🇩🇪 Deutsch
+
+* **Neu: Autostart-Profile** (Streaming-Tab, unten — Kompatibilität, Encoder und Grafikkarte bleiben oben). „＋ Neues Profil“ legt ein Profil an: *wenn Spiel X läuft UND das Headset verbunden ist → starte diese Programme*, schließt sie wieder, wenn das Spiel endet oder die Brille ab ist (entprellt, ~6 s). Auslöser per „Laufende…“ (laufende Programme) oder „🎮 Games“ (alle Spiele aus dem Games-Tab; Steam-Spiele werden über `AppId=` in Steams `reaper`-Kommandozeile erkannt, egal wie die .exe heißt). Pro Profil: Verzögerung, **Abstand** zwischen den Programmen (gestaffelter Start, schont die Leistung beim Laden), „Mit beenden“, „⏸ Timer stoppen / ▶ Timer starten“. Große Knöpfe **▶ Programme starten / ■ Programme stoppen** – gut mit dem Laserpointer im Headset (WayVR) zu treffen. Grüner Punkt am Tab = Programme laufen.
+* **Hauptschalter „Mit App-Profilen starten“** (Standard: aus). Aus = kein Timer, kein Hintergrund-Wächter; die Knöpfe gehen trotzdem.
+* **Performance:** ein Timer für alle Profile (3 s), läuft nur, wenn der Hauptschalter an ist und ein Profil Auslöser + Programm hat. Prozesse werden direkt aus `/proc` gelesen (kein `pgrep`/`ps`), das Headset aus `/proc/net/tcp` (kein `ss`/`pactl`) – und nur, wenn der Auslöser läuft.
+* **Profile im Terminal-Modus:** `YC-wivrn-toggle` startet zusätzlich den Wächter `_profile-watch` (dieselben Regeln, `core/autostart_profiles.py`). „Im Terminal starten“ übergibt laufende Programme, die Oberfläche holt sie beim nächsten Start zurück. `YC-killapps` schließt auch Profil-Programme, `YC-status` zeigt eine Zeile „Profile“.
+* **Dashboard-Autostart aufgeräumt:** statt „Anzahl zu startender Programme“ jetzt **+ Programm** oben links und **✕** je Zeile (entfernt genau diese Zeile). Gespeichert wird wie bisher (`autostart_count`/`autostart_apps`). Knopf „Browse...“ wird nicht mehr abgeschnitten.
+* **Streaming-Tab scrollt** (war ohne Scrollbereich).
+* **WiVRn als Flatpak / SteamOS (experimentell, nicht auf echter Hardware getestet):** Ist WiVRn nur als Flatpak installiert, startet der Server per `flatpak run --command=wivrn-server io.github.wivrn.wivrn` (GPU-Wahl per `--env`), Streaming-Einstellungen landen in `~/.var/app/io.github.wivrn.wivrn/config/wivrn/config.json`, die Version kommt aus `flatpak info`. SteamOS/ChimeraOS werden erkannt: Installations-Methode „Flatpak“ statt AUR (`flatpak install --user`, kein Passwort, kein Entsperren), Update per `flatpak update`. Cargo-Builds (obah, XR HOTAS) brechen dort mit klarer Meldung ab statt `sudo pacman` zu versuchen. Native Installationen haben immer Vorrang.
+* **Sprachauswahl in Einstellungen → Allgemein** (ganz oben, statt klein auf dem Dashboard). Die Liste kommt aus `locales/*.json` (neuer Schlüssel `language_name`) — eine neue Sprache erscheint automatisch, ohne Code-Änderung (`locales/CONTRIBUTING.md` erklärt es).
+* README: „Key Features“ als verständliche Tabelle ohne Fachwissen (inkl. Tastenbelegung für OpenVR/OpenXR, Deadzone, Sprache) + kleines Glossar, Details eingeklappt; SteamOS in „Tested systems“.
+* **Tests schreiben nicht mehr ins echte Home:** `tests/conftest.py` setzt für den ganzen Testlauf ein Wegwerf-`HOME` (XDG-Variablen entfernt). Vorher landeten Dateien mehrerer Testmodule in `~/.config/yakuda-connect`, und `test_gpu_select` schlug zufällig fehl, sobald dort eine Grafikkarte gespeichert war.
+* Neue Dateien: `core/autostart_profiles.py`, `core/process_watch.py`, `core/tabs/autostart_profiles_mixin.py`, `tests/test_autostart_profiles.py`, `tests/test_steamos_flatpak.py`, `tests/test_language_setting.py`.
+
+#### 🇬🇧 English
+
+* **New: autostart profiles** (Streaming tab, at the bottom — compatibility, encoder and GPU stay on top). “＋ New profile” creates a profile: *when game X runs AND the headset is connected → start these programs*, and close them again when the game ends or the headset comes off (debounced, ~6 s). Pick the trigger via “Running…” (running programs) or “🎮 Games” (every game from the Games tab; Steam games are matched by `AppId=` in Steam's `reaper` command line, whatever the .exe is called). Per profile: delay, **gap** between programs (staggered start, easier on performance while loading), “close together”, “⏸ Stop timer / ▶ Start timer”. Big **▶ Start programs / ■ Stop programs** buttons – easy to hit with the laser pointer in the headset (WayVR). Green dot on a tab = its programs are running.
+* **Master switch “Start with app profiles”** (default: off). Off = no timer, no background watcher; the buttons still work.
+* **Performance:** one timer for all profiles (3 s), only running when the master switch is on and a profile has a trigger + program. Processes are read straight from `/proc` (no `pgrep`/`ps`), the headset from `/proc/net/tcp` (no `ss`/`pactl`) – and only while the trigger runs.
+* **Profiles in terminal mode:** `YC-wivrn-toggle` also starts the `_profile-watch` watcher (same rules, `core/autostart_profiles.py`). “Start in terminal” hands running programs over, the GUI takes them back on its next start. `YC-killapps` also closes profile programs, `YC-status` shows a “Profiles” line.
+* **Dashboard autostart tidied up:** instead of “number of programs” there is now **+ Program** (top left) and **✕** per row (removes exactly that row). Saved as before (`autostart_count`/`autostart_apps`). The “Browse...” button is no longer cut off.
+* **Streaming tab scrolls** (it had no scroll area).
+* **WiVRn as Flatpak / SteamOS (experimental, not tested on real hardware):** if WiVRn is only installed as a Flatpak, the server starts via `flatpak run --command=wivrn-server io.github.wivrn.wivrn` (GPU choice via `--env`), streaming settings go to `~/.var/app/io.github.wivrn.wivrn/config/wivrn/config.json`, the version comes from `flatpak info`. SteamOS/ChimeraOS are detected: install method “Flatpak” instead of AUR (`flatpak install --user`, no password, no unlocking), updates via `flatpak update`. Cargo builds (obah, XR HOTAS) stop there with a clear message instead of trying `sudo pacman`. Native installs always take precedence.
+* **Language picker in Settings → General** (at the top, instead of small on the dashboard). The list comes from `locales/*.json` (new key `language_name`) — a new language shows up automatically, no code change (`locales/CONTRIBUTING.md` explains how).
+* README: “Key Features” as an easy table without jargon (incl. bindings for OpenVR/OpenXR, deadzone, language) + a small glossary, details collapsed; SteamOS in “Tested systems”.
+* **Tests no longer write to the real home:** `tests/conftest.py` sets a throwaway `HOME` for the whole test run (XDG variables removed). Previously several test modules wrote into `~/.config/yakuda-connect`, and `test_gpu_select` failed at random whenever a graphics card was saved there.
+* New files: `core/autostart_profiles.py`, `core/process_watch.py`, `core/tabs/autostart_profiles_mixin.py`, `tests/test_autostart_profiles.py`, `tests/test_steamos_flatpak.py`.
+
+### 🚀 v1.3.5 — 2026-09-23
+
+#### 🇩🇪 Deutsch
+
+* **Neu: Terminal-Modus ohne Oberfläche** (kein Qt, spart RAM unter VR). Befehle `YC-help`, `YC-status`, `YC-wivrn-toggle`, `YC-openvr`, `YC-encoder`, `YC-GPU`, `YC-killapps`, `YC-autostart-reset`, `YC-pairing`; Auswahl per Nummer oder direkt (`YC-encoder vaapi`). AUR-Paket und `install.sh` legen die Befehle systemweit an, für AppImage/Quellcode gibt es Einstellungen → Erweitert → „Befehle einrichten“ (`~/.local/bin`). „Im Terminal starten“ öffnet das Menü und schließt die Oberfläche, der Server läuft weiter. Neue Dateien: `core/cli.py`, `core/cli_install.py`, `core/autostart_runner.py`, `tests/test_cli.py`.
+* **Autostart auch im Terminal-Modus.** `YC-wivrn-toggle` schaltet wie der Dashboard-Schalter den Start-Timer scharf: ein kleiner Wächter im Hintergrund (ohne Qt) wartet aufs Headset, startet die Programme einmal und beendet sich. `YC-killapps` schließt sie (inkl. eigener Kill-Befehle, Server läuft weiter), `YC-autostart-reset` setzt den Start-Timer zurück. Beim Umschalten per „Im Terminal starten“ übernimmt der Terminal-Modus laufende Programme und einen noch wartenden Timer; umgekehrt schließt die Oberfläche auch Programme, die der Terminal-Modus gestartet hat.
+* **Kopplung im Terminal:** `YC-pairing` aktiviert die Kopplung (`wivrnctl pair`) und zeigt die PIN groß an. Enter oder Strg+C beendet sie.
+* **AppImage: Delta-Updates per `.zsync`.** Die AppImage trägt jetzt Update-Informationen (`gh-releases-zsync`), und zu jedem Release gibt es eine `.zsync`-Datei. AppImageUpdate, AppImageLauncher, AppManager, AM & Co. erkennen Updates selbst und laden nur die geänderten Teile statt der ganzen Datei. `build_appimage.sh` erzeugt beides und prüft es.
+* **Behoben: AppImage-Start-Test meldete „nicht eindeutig“.** `--selftest` lief durch, beim Beenden brach Qt aber ab, weil die GPU-Erkennung im Hintergrund noch lief (Exitcode 134). Der Selbsttest beendet sich jetzt sauber.
+
+#### 🇬🇧 English
+
+* **New: terminal mode without GUI** (no Qt, saves RAM in VR). Commands `YC-help`, `YC-status`, `YC-wivrn-toggle`, `YC-openvr`, `YC-encoder`, `YC-GPU`, `YC-killapps`, `YC-autostart-reset`, `YC-pairing`; pick by number or directly (`YC-encoder vaapi`). The AUR package and `install.sh` install the commands system-wide; for AppImage/source use Settings → Advanced → “Set up commands” (`~/.local/bin`). “Start in terminal” opens the menu and closes the GUI, the server keeps running. New files: `core/cli.py`, `core/cli_install.py`, `core/autostart_runner.py`, `tests/test_cli.py`.
+* **Autostart in terminal mode too.** Like the dashboard switch, `YC-wivrn-toggle` arms the start timer: a small background watcher (no Qt) waits for the headset, starts the programs once and exits. `YC-killapps` closes them (including custom kill commands, server keeps running), `YC-autostart-reset` resets the start timer. When switching via “Start in terminal”, terminal mode takes over running programs and a still-waiting timer; in turn the GUI also closes programs that terminal mode started.
+* **Pairing in the terminal:** `YC-pairing` enables pairing (`wivrnctl pair`) and shows the PIN in large type. Enter or Ctrl+C ends it.
+* **AppImage: delta updates via `.zsync`.** The AppImage now carries update information (`gh-releases-zsync`), and every release ships a `.zsync` file. AppImageUpdate, AppImageLauncher, AppManager, AM and others detect updates on their own and download only the changed parts instead of the whole file. `build_appimage.sh` creates and verifies both.
+* **Fixed: AppImage start test said “not conclusive”.** `--selftest` passed, but Qt aborted on exit because GPU detection was still running in the background (exit code 134). The self-test now exits cleanly.
+
+### 🚀 v1.3.4 — 2026-09-22
+
+#### 🇩🇪 Deutsch
+
+**Performance (wichtig unter VR)**
+
+* **Start rund 3 s schneller** (gemessen: `VRApp.__init__` 3,9 s → 0,5–0,6 s). Das Theme setzt Stylesheets nur noch, wenn sich wirklich etwas ändert. Qt poliert sonst bei jedem Aufruf neu, auch bei gleichem Text, und das bei über 1000 Widgets. Das Anwendungs-Stylesheet wird einmal gleich gefärbt gesetzt statt zweimal (`theme.remember_app_base`, `set_style_if_changed`).
+* **Kein Einfrieren mehr beim Start:** Die Paketprüfung lief direkt zweimal, und die zweite wartete per `QThread.wait()` im Haupt-Thread bis zu 2 s. Jetzt wird sie vorgemerkt und nach dem Ende des ersten Durchlaufs gestartet (beim Schließen nicht mehr).
+* **Weniger Dauerlast:** Der Mausrad-Schutz für Aufklapplisten hing als Event-Filter an der ganzen App. Damit lief jedes Ereignis (Mausbewegung, Neuzeichnen, Timer) durch Python, allein beim Start über 100.000 Mal. Jetzt wird nur `QComboBox.wheelEvent` ersetzt.
+* **Tools-Tab erst beim ersten Öffnen bauen:** Das sind rund 430 Widgets und etwa 10 MB, die die meisten Sitzungen nie brauchen. RAM beim Start etwa 115 → 106 MB. Der Controls-Tab liest die Tool-Daten direkt aus `tools.json` und baut die Karten nur, wenn er etwas installiert (`_ensure_tools_ui`). Im Leerlauf gemessen: 0,06 s CPU in 10 s. Der Autostart-Timer stoppt sich weiterhin selbst, sobald das Headset verbunden ist.
+* **Grafikkarten-Erkennung im Hintergrund:** `vulkaninfo --summary` lief beim Start bis zu dreimal im Haupt-Thread, und das kann auf echten Systemen spürbar dauern. Jetzt läuft die Erkennung einmal pro Sitzung in einem Hintergrund-Thread und wird gemerkt. Solange zeigt die Auswahl „Grafikkarten werden erkannt …“, die gespeicherte Karte bleibt ausgewählt. ↻ erkennt neu. Auch der Server-Start nutzt die gemerkte Liste.
+* **Behoben: Design kam nach Neustart nicht zurück.** `theme.load()` wurde nie aufgerufen, das gespeicherte Theme galt nur bis zum Schließen.
+* **Aufklapplisten bleiben deckend:** Qt setzt die Liste beim ersten Anzeigen der Combo zurück. Das hat bisher nur das ständige Neu-Setzen der Stylesheets überdeckt. Der Wächter beobachtet jetzt auch die Combo und merkt sich nichts mehr in Python-Attributen.
+
+**Controls: Stick-Drift, Kippen und alte Spiele (xrBinder)**
+
+* **Neu: „⇄ Kippen“ beim Stick-Drücken.** Im Tasten-Dialog lässt sich für jede Funktion auf „Stick drücken“ einschalten, dass sie auch beim bloßen Kippen des Sticks auslöst (ab halbem Weg, auch schräg) — wie die beliebten Community-Bindings älterer Spiele unter SteamVR („dpad im Touch-Modus“). Geschrieben als Achs-Ausdruck für xrBinder (`axis1 = step(…)`), bewusst ohne `max()`/`min()`: die sind in xrBinder vertauscht.
+* **Neu: Schwelle fürs Kippen (gegen Stick-Drift).** Ist „⇄ Kippen“ an, steht daneben ein Regler (20–95 %, Standard 50 %): ab wie viel Ausschlag das Kippen als Drücken zählt. Ein driftender Stick bekommt einfach eine höhere Schwelle, pro Spiel und Hand. Getestet von Ketsu mit Gal*Gun 2: Menüs lassen sich jetzt ganz ohne Tastatur bedienen.
+* **Neu: „◎ Deadzone“ gegen Stick-Drift.** Klick auf den Stick öffnet den Dialog mit Tabs „Belegung | ◎ Deadzone“. Im Deadzone-Tab: Regler für Links, Rechts und Beide (0 = aus, 5–50 %), je mit ↺, dazu welche Funktionen betroffen sind. Gilt pro Spiel für alle Stick-Richtungen auf diesem Stick (z. B. Laufen, Drehen). Kleine Ausschläge um die Mitte kommen beim Spiel als 0 an. Geschrieben als Achs-Ausdrücke für xrBinder (`axis1/axis2 = x/y * step(T, √(x²+y²))`). Funktionen ohne Hand, die auf beiden Sticks liegen, bekommen keine Deadzone (sonst würde der andere Stick mit umgelegt). Ändern sich Deadzone oder Kippen, lädt YC nicht mehr live neu (stürzt in xrBinder ab), sondern meldet „gilt nach Neustart“. Klappt auch für OpenVR-Spiele, die über xrizer oder OpenComposite laufen – xrizer selbst ignoriert SteamVRs `deadzone_pct`. **Noch nicht im Spiel getestet.**
+* **Alte OpenVR-Spiele über xrizer:** xrizer meldet Unreal-Spiele unter ihrem Startpfad (z. B. `GalGun2/Binaries/Win64/GalGun2-Win64-Shipping`). Solche Namen wurden bisher aussortiert — jetzt werden sie unterstützt (Konfiguration in Unterordnern, abgesichert gegen `..`), der auf 31 Zeichen gekürzte Name wird aus der Befehlszeile des Spiels vervollständigt, und in der Liste steht nur der letzte Teil. Damit lassen sich auch OpenVR-Spiele ohne Action-Datei umbelegen, solange sie über xrizer laufen.
+* **xrizer unter WiVRn:** Die Runtime meldet für xrizers Tasten keine Zuordnung (nur Vibration und Handposition), obwohl sie im Spiel funktionieren. Dann trägt Yakuda Connect xrizers feste Standardbelegung ein (aus dessen Quellcode, Touch/Index/Vive) und sagt das in der Statuszeile. Gesperrt wird nichts mehr, wenn die Runtime gar keine Quellen nennt.
+* **Behoben: Verschieben/Kippen wirkte nie.** Yakuda Connect schrieb die Tasten für beide Hände als `/user/hand/both/…` (ein interner Name wurde doppelt vergeben). Den Pfad gibt es nicht, deshalb lehnte die Runtime bei jedem Profil alle Layer-Tasten ab (`XR_ERROR_PATH_UNSUPPORTED`). „Aus“ ging trotzdem, weil es keine Taste braucht. Gefunden über das neue Diagnose-Log (Gal*Gun 2). Betroffene Dateien repariert YC beim Start selbst, die Umbelegungen bleiben erhalten.
+* **xrBinder-Patch 2:** Achs-Umbelegungen meldeten dem Spiel jedes Bild eine Änderung (für manche Spiele ein Dauer-Tastendruck). Beim Bauen wird das korrigiert — ältere Builds zeigen „bitte Neu bauen“.
+* **xrBinder-Patch 3 (bitte „Neu bauen“):** Diagnose-Log `~/.config/xrBinder/yakuda-debug.log` (Ergebnis von Suggest/Attach/Sync und jede Zustandsänderung der Layer-Tasten), erreichbar über den Knopf „Diagnose-Log“ auf der Karte (immer sichtbar, sobald xrBinder gebaut ist). Scheitert der zusammengeführte Suggest, schlägt das Layer die Belegung des Spiels allein erneut vor — sonst hätte das Spiel für dieses Profil gar keine Tasten. Zwei Korrekturen für ältere xrBinder-Stände (Sync-Kopie `count + sizeof`, Vector2-Typ) greifen nur, wo der Fehler noch drin ist; die aktuelle Version hat sie schon behoben. Passt der Log-Teil nicht zur xrBinder-Version, wird ohne ihn gebaut.
+* **xrBinder-Patch 4 (Diagnose):** Das Diagnose-Log schreibt jetzt auch Stick- und Achswerte der Layer-Quellen und was das Spiel für umgelegte Sticks bekommt (nur bei Änderung, gerundet). Grundlage für ein späteres „Stick auf 4 Richtungen einrasten“.
+* **Hinweis bei grauen Spielen:** Läuft gerade ein OpenXR-Spiel, nennt der Hinweis unter einem Spiel „ohne Action-Datei“ dessen eigenen Eintrag in der Liste.
+* **Neue Dateien:** `tests/test_performance.py`, `tests/test_xr_button_dialog.py`.
+
+#### 🇬🇧 English
+
+**Performance (matters in VR)**
+
+* **Startup about 3 s faster** (measured: `VRApp.__init__` 3.9 s → 0.5–0.6 s). The theme only sets stylesheets when something actually changes. Otherwise Qt re-polishes on every call, even with identical text, across more than 1000 widgets. The application stylesheet is set once, already tinted, instead of twice (`theme.remember_app_base`, `set_style_if_changed`).
+* **No more freeze at startup:** the package check ran twice right away, and the second one waited up to 2 s via `QThread.wait()` on the main thread. It is now queued and started when the first one ends (not while closing).
+* **Less constant load:** the mouse-wheel guard for dropdowns was an event filter on the whole app, so every event (mouse move, repaint, timer) went through Python, over 100,000 times at startup alone. Now only `QComboBox.wheelEvent` is replaced.
+* **Tools tab is built on first open:** that is about 430 widgets and roughly 10 MB that most sessions never need. RAM at startup about 115 → 106 MB. The Controls tab reads tool data straight from `tools.json` and only builds the cards when it installs something (`_ensure_tools_ui`). Measured at idle: 0.06 s CPU in 10 s. The autostart timer still stops itself once the headset is connected.
+* **Graphics card detection in the background:** `vulkaninfo --summary` ran up to three times on the main thread at startup, which can take noticeably long on real systems. Detection now runs once per session in a background thread and is remembered. Meanwhile the dropdown shows “Detecting graphics cards …” and the saved card stays selected. ↻ detects again. Server start uses the remembered list too.
+* **Fixed: design didn't come back after restart.** `theme.load()` was never called, so the saved theme only lasted until closing.
+* **Dropdowns stay opaque:** Qt resets the list the first time the combo is shown. Until now only the constant re-setting of stylesheets hid this. The guard now also watches the combo and no longer keeps state in Python attributes.
+
+**Controls: stick drift, tilt and old games (xrBinder)**
+
+* **New: “⇄ Tilt” for stick presses.** In the button dialog, any function on “stick press” can be set to also trigger when the stick is merely tilted (past halfway, diagonals included) — like the popular community bindings for older games under SteamVR (“dpad in touch mode”). Written as an axis expression for xrBinder (`axis1 = step(…)`), deliberately without `max()`/`min()`: those are swapped in xrBinder.
+* **New: tilt threshold (against stick drift).** With “⇄ Tilt” on, a control next to it (20–95 %, default 50 %) sets how far the stick must be tilted to count as a press. A drifting stick simply gets a higher threshold, per game and hand. Tested by Ketsu with Gal*Gun 2: menus now work without the keyboard.
+* **New: “◎ Deadzone” against stick drift.** Clicking the stick opens the dialog with tabs “Bindings | ◎ Deadzone”. The deadzone tab has sliders for left, right and both (0 = off, 5–50 %), each with ↺, plus which functions are affected. Applies per game to all stick directions on that stick (e.g. move, turn). Small movements around the center reach the game as 0. Written as axis expressions for xrBinder (`axis1/axis2 = x/y * step(T, √(x²+y²))`). Functions without a hand that sit on both sticks get no deadzone (the other stick would be remapped too). If deadzone or tilt change, YC no longer reloads live (crashes in xrBinder) but reports “takes effect after restart”. Also works for OpenVR games running via xrizer or OpenComposite – xrizer itself ignores SteamVR's `deadzone_pct`. **Not tested in game yet.**
+* **Old OpenVR games via xrizer:** xrizer reports Unreal games by their launch path (e.g. `GalGun2/Binaries/Win64/GalGun2-Win64-Shipping`). Such names used to be filtered out — they are supported now (config in subfolders, guarded against `..`), the name cut to 31 characters is completed from the game's command line, and the list shows only the last part. This makes OpenVR games without an action file remappable too, as long as they run through xrizer.
+* **xrizer under WiVRn:** the runtime reports no bindings for xrizer's buttons (only haptics and hand pose), although they work in game. Yakuda Connect then fills in xrizer's fixed default layout (from its source code, Touch/Index/Vive) and says so in the status line. Nothing gets locked any more when the runtime names no sources at all.
+* **Fixed: moving/tilt never worked.** Yakuda Connect wrote buttons for both hands as `/user/hand/both/…` (an internal name was defined twice). That path doesn't exist, so the runtime rejected all layer buttons for every profile (`XR_ERROR_PATH_UNSUPPORTED`). “Off” still worked because it needs no button. Found via the new diagnostic log (Gal*Gun 2). Yakuda Connect repairs affected files on start, remappings are kept.
+* **xrBinder patch 2:** axis remappings reported a change to the game every frame (a constant button press for some games). The build now fixes this — older builds show “please Rebuild”.
+* **xrBinder patch 3 (please “Rebuild”):** diagnostic log `~/.config/xrBinder/yakuda-debug.log` (result of suggest/attach/sync and every state change of the layer buttons), reachable via the “Diagnostic log” button on the card (always visible once xrBinder is built). If the merged suggestion fails, the layer re-suggests the game's own bindings alone — otherwise the game had no buttons at all for that profile. Two fixes for older xrBinder versions (sync copy `count + sizeof`, vector2 type) only apply where the bug still exists; the current version already fixed them. If the log part doesn't fit the xrBinder version, it builds without it.
+* **xrBinder patch 4 (diagnostics):** the diagnostic log now also records stick/axis values of the layer sources and what the game receives for remapped sticks (only on change, rounded). Groundwork for a later “snap stick to 4 directions”.
+* **Hint for greyed-out games:** while an OpenXR game is running, the hint under a game “without action file” names its separate entry in the list.
+* **New files:** `tests/test_performance.py`, `tests/test_xr_button_dialog.py`.
+
+---
+
+### 🚀 v1.3.3 — 2026-09-21
+
+#### 🇩🇪 Deutsch
+
+**Controls: Tasten für OpenXR-Spiele umlegen (xrBinder)**
+
+* **OpenXR-Spiele im selben Editor wie obah.** Der Bereich heißt jetzt „Controls per obah & xrBinder“. OpenXR-Spiele (z. B. viele Unreal-Spiele unter Proton) stehen mit „· OpenXR“ in derselben Spieleliste (Reihenfolge: OpenVR-Spiele, OpenXR-Spiele, ganz unten die ohne Action-Datei) und bekommen dieselbe Controller-Ansicht: zwei Controller, je Taste eine Karte, Klick öffnet den Tasten-Dialog. Der Controller wird erkannt, im Hintergrund arbeitet [xrBinder](https://gitlab.com/mittorn/xrBinder) von mittorn (MIT). OpenVR-Spiele laufen weiter über obah.
+* **Neue Karte „xrBinder“ oben** neben XR HOTAS und obah, gleiches Design. Der Schalter baut xrBinder beim ersten Mal im sichtbaren Terminal (git + cmake, ohne GUI), trägt das Layer unter `~/.local/share/openxr/1/api_layers/implicit.d/yakuda-xrbinder.json` ein, schreibt `~/.config/xrBinder/xrBinder.ini` und startet den IPC-Dienst (`yakuda-xrbinder-ipc.service`, sonst Hintergrundprozess). Eine eigene `xrBinder.ini` wird vorher gesichert.
+* **Tasten-Dialog:** je Teil der Taste (Drücken, Berühren, Stärke …) die Funktionen des Spiels, die dort liegen. „＋ Funktion zuweisen“ legt eine Funktion hierher (sie verschwindet von ihrer alten Taste), „✕“ nimmt sie weg (verschoben → zurück an ihre Taste, sonst abgeschaltet). „↪“ markiert verschobene Funktionen. Die Liste zeigt nur Funktionen des erkannten Controllers; Funktionen für andere Controller (z. B. „Mixed Reality …“ bei Unreal) stehen unten unter „Andere Controller / ohne Taste“.
+* **Hinweis, wenn etwas fehlt:** Ist obah oder xrBinder nicht installiert (oder xrBinder aus / neu zu bauen), steht das oben im Bereich — mit Knopf „Installieren“ bzw. „Einschalten“ (gleicher Weg wie der Schalter der Karte).
+* **Zurücksetzen:** „↺ Standard für diese Taste“ im Dialog, „↺ Alles auf Standard“ über der Ansicht.
+* **Spiel einmal starten reicht.** Laufende Spiele melden sich automatisch; ihre Aktionen werden gemerkt (`~/.config/yakuda-connect/xrbinder/<Spiel>.json`), danach geht das Bearbeiten auch ohne laufendes Spiel.
+* **Nur Tasten, die es gibt.** Angeboten wird nur, was im aktiven Controller-Profil des Spiels existiert und vom Typ passt. Die Quellen stammen aus einer Tabelle der Kern-Profile der OpenXR-Spezifikation (Simple, Touch, Index, Vive, WMR), jeder Pfad wurde gegen Monados Prüfung getestet. Ein falscher Pfad hätte sonst alle Tasten des Spiels für dieses Profil gekostet.
+* **Live, wo es sicher ist.** Läuft das Spiel, wird nach „Speichern“ neu geladen — aber nur, wenn dabei keine aktive Umbelegung wegfällt. Das Entfernen stürzt in xrBinder das Spiel ab (nachgestellt); dann heißt es „gilt nach Neustart“.
+* **Unreal-Spiele (z. B. Wanderer):** Sie fragen ihre Tasten ohne Hand ab. Das aktualisiert xrBinder nicht — Umbelegungen kamen nie an. Beim Bauen wird deshalb eine Zeile in xrBinder korrigiert, und jede Umbelegung gilt zusätzlich für die Abfrage ohne Hand (`aktion.any`). Ältere Builds zeigen „bitte Neu bauen“.
+* **Von Hand kopierte xrBinder-Dateien** im `implicit.d`-Ordner werden erkannt; „Aufräumen“ verschiebt sie in einen Sicherungsordner, damit das Layer nicht doppelt lädt.
+* **Neue Dateien:** `core/xrbinder.py` (Dateien, Dienst, Bauen), `core/xrbinder_ipc.py` (UDP-Protokoll, Offsets per `offsetof` aus xrBinders Headern), `core/xrbinder_session.py`, `core/xr_bindings.py` (Belegungsregeln), `core/tabs/xr_controls_mixin.py`, `ui/xrbinder_panel.py` (Karte), `ui/xr_button_dialog.py`, `tests/test_xrbinder.py`, `tests/test_xr_bindings.py`.
+
+#### 🇬🇧 English
+
+**Controls: remap buttons for OpenXR games (xrBinder)**
+
+* **OpenXR games in the same editor as obah.** The section is now called “Controls via obah & xrBinder”. OpenXR games (e.g. many Unreal games under Proton) appear with “· OpenXR” in the same game list (order: OpenVR games, OpenXR games, games without an action file last) and get the same controller view: two controllers, one card per button, click opens the button dialog. The controller is detected; [xrBinder](https://gitlab.com/mittorn/xrBinder) by mittorn (MIT) does the work in the background. OpenVR games keep using obah.
+* **New “xrBinder” card at the top** next to XR HOTAS and obah, same design. The switch builds xrBinder on first use in a visible terminal (git + cmake, no GUI), registers the layer at `~/.local/share/openxr/1/api_layers/implicit.d/yakuda-xrbinder.json`, writes `~/.config/xrBinder/xrBinder.ini` and starts the IPC service (`yakuda-xrbinder-ipc.service`, otherwise a background process). An existing hand-made `xrBinder.ini` is backed up first.
+* **Button dialog:** per part of the button (press, touch, strength …) the game functions currently on it. “＋ Assign function” moves a function here (it leaves its old button), “✕” removes it (moved → back to its button, otherwise disabled). “↪” marks moved functions. The list only shows functions of the detected controller; functions for other controllers (e.g. “Mixed Reality …” in Unreal games) are at the bottom under “Other controllers / no button”.
+* **Notice when something is missing:** if obah or xrBinder is not installed (or xrBinder is off / needs a rebuild), the section says so at the top — with an “Install” or “Switch on” button (same path as the card's switch).
+* **Reset:** “↺ Default for this button” in the dialog, “↺ All to default” above the view.
+* **Starting the game once is enough.** Running games register automatically; their actions are remembered (`~/.config/yakuda-connect/xrbinder/<game>.json`), so editing works without the game running afterwards.
+* **Only buttons that exist.** Only what exists in the game's active controller profile and matches the type is offered. Sources come from a table of the OpenXR core profiles (Simple, Touch, Index, Vive, WMR); every path was checked against Monado's validation. A wrong path would otherwise have cost the game all its bindings for that profile.
+* **Live where it is safe.** If the game is running, “Save” reloads the config — but only if no active remapping gets removed. Removing one crashes the game in xrBinder (reproduced); then the result says “applies after restart”.
+* **Unreal games (e.g. Wanderer):** they query their buttons without a hand. xrBinder does not update that case, so remappings never arrived. The build now patches one line in xrBinder, and every remapping also covers the no-hand query (`action.any`). Older builds show “please Rebuild”.
+* **Hand-copied xrBinder files** in the `implicit.d` folder are detected; “Clean up” moves them to a backup folder so the layer is not loaded twice.
+* **New files:** `core/xrbinder.py` (files, service, build), `core/xrbinder_ipc.py` (UDP protocol, offsets taken via `offsetof` from xrBinder's headers), `core/xrbinder_session.py`, `core/xr_bindings.py` (binding rules), `core/tabs/xr_controls_mixin.py`, `ui/xrbinder_panel.py` (card), `ui/xr_button_dialog.py`, `tests/test_xrbinder.py`, `tests/test_xr_bindings.py`.
+
+---
+### 🚀 v1.3.2 — 2026-09-21
+
+#### 🇩🇪 Deutsch
+
+**Controls: Punkte sitzen auf den neuen Controller-Bildern**
+
+* **Neue Bilder für Touch, Index (Knuckles), Vive Wand, Vive Focus 3 und Gamepad.** Die Punkte (und damit die Linien) landeten bisher daneben: Sie kamen aus obahs Profilkoordinaten, und das Bild wurde in eine Fläche mit anderem Seitenverhältnis eingepasst.
+* **Neu: `assets/controls/points.json`.** Je Bild die Pixel jeder Eingabe (`"knuckles_left": {"size": [...], "points": {"/input/trigger": [x, y], ...}}`). Linke und rechte Bilder haben je eigene Punkte — die rechten sind keine exakten Spiegelungen.
+* **Bild mit Punkten = eigenes Seitenverhältnis.** Durchsichtige Ränder werden abgeschnitten, das Bild wird höchstens 330 × 380 px groß angezeigt. Die Karten stehen nach der Höhe der Bildpunkte sortiert, damit sich die Linien nicht kreuzen.
+* **Eigene Bilder funktionieren weiter.** `points.json` wird im selben Ordner wie das Bild gesucht, also auch in `~/.config/yakuda-connect/controls/`. Fehlt der Eintrag oder passt das Seitenverhältnis nicht zur Angabe, gilt das alte Verfahren (Profilpunkte, Einpassen in die Zeichenfläche).
+* **obahs Profilpunkte in `core/obah_editor.py` wieder im Original.** Sie wurden lokal auf das alte Touch-Bild umgerechnet und passten damit nicht mehr zur eingebauten Zeichnung.
+* **Bilder werden je Seite gepuffert.** Vorher leerte jedes Laden den Puffer — linke und rechte Seite luden sich bei jedem Neuzeichnen gegenseitig neu von der Platte.
+
+**Controls: Controller gleich groß, Linien obendrauf, Wand in der Mitte**
+
+* **Bilder paarweise zugeschnitten.** Touch, Focus 3, Index und Vive: durchsichtige Ränder entfernt, links und rechts auf dieselbe Leinwand gebracht, Controller jeweils zur Mitte hin ausgerichtet. `points.json` mitgerechnet. Die App schneidet nicht mehr selbst zu — dadurch sind beide Seiten auf dem Schirm immer exakt gleich groß.
+* **Linien laufen über den Controller** statt darunter zu verschwinden.
+* **Controller bleibt im Kasten.** Beim Ziehen hält er an der Mitte (und an den anderen Rändern) an, statt halb zu verschwinden — auch beim Laden einer alten Anordnung nach Verkleinern des Fensters.
+* **Beide Seiten bewegen sich gespiegelt.** Wer den linken Controller verschiebt, verschiebt den rechten spiegelbildlich mit (und umgekehrt); gemerkt werden beide.
+* **Beide Controller auf derselben Höhe.** Vorher stand jeder mittig zu seiner eigenen Kartenspalte — hatte eine Seite mehr oder längere Karten (andere Belegung), saß ihr Controller tiefer. Jetzt zählt nebeneinander die höhere Spalte für beide. Ältere Anordnungen mit eigenem Versatz je Seite werden beim Laden angeglichen (links gibt den Ton an).
+* **Zweite Kartenspalte zum Sortieren.** Eine Karte weit nach außen ziehen legt sie in eine äußere Spalte neben der inneren; zurückziehen holt sie wieder rein. **In der äußeren Spalte steht jede Karte frei in der Höhe** — dort, wo man sie loslässt, nicht von oben gestapelt. Überlappen kann nichts: ragt eine Karte in eine andere, rutscht die darunter liegende nach unten. Gemerkt wird die Höhe je Karte (`outer: {pfad: y}`; die ältere Listenform lädt weiter). Beim Ziehen springt nichts unter der Maus — Platz reserviert der Kasten erst nach dem Loslassen (bei schmalem Fenster stehen die Seiten dann untereinander). Gemerkt wird das in der Anordnung (`outer`), auch in Profilen; „Anordnung zurücksetzen“ holt alles zurück.
+* **Mausrad ändert keine Aufklapplisten mehr.** Beim Scrollen über eine Combo scrollt die Seite weiter, statt still Spiel, Controller oder Quelle umzustellen — gilt in der ganzen App (neu: `ui/no_wheel.py`). In der aufgeklappten Liste scrollt das Rad wie gewohnt.
+* **In der Mitte nur noch ein dünner Strich** statt 24 px Lücke; beide Controller haben 4 px Abstand zur Mitte.
+
+**Controls: alle Spiele aus dem Games-Tab in der Spielauswahl**
+
+* **① Spiel zeigt jetzt jedes Spiel aus dem Games-Tab** — getestete, ungetestete, Nicht-Steam-Spiele und eigene Einträge — zusätzlich zu allen Steam-Spielen mit Action-Datei (wie bisher).
+* **Ordner von Nicht-Steam-Spielen:** Startordner des Steam-Eintrags, sonst der Ordner der Programmdatei. Home, `/`, `/usr/bin` & Co. werden nicht durchsucht (Heroic-/Lutris-Starter), und die Suche bricht nach 4000 Ordnern ab.
+* **Spiele ohne Action-Datei stehen grau in der Liste** („keine Action-Datei“), Controller und Quelle sind dann gesperrt, und die Hinweiszeile sagt, wo gesucht wurde. Ohne `actions.json` gibt es keine Aktionen zum Belegen — bei Spielen, die OpenXR direkt nutzen, ist das normal.
+* **Gründlichere Suche nach der Action-Datei.** Zusätzlich zu obahs vier Namen zählt `steamvr_manifest.json` (Unreals SteamVR-Input-Plugin, liegt unter `Config/SteamVRBindings/`) — aber nur, wenn wirklich eine Liste `actions` drinsteht. Findet sich im Spielordner nichts, wird im Proton-Prefix gesucht (`compatdata/<AppID>/pfx/…/AppData/Local`, `LocalLow`, `Roaming`, `Documents`, `Saved Games`; höchstens 8000 Ordner).
+* **Action-Datei von Hand wählen:** Knopf „📂 Action-Datei …“ neben ① Spiel. Die Datei wird geprüft (Liste `actions` muss da sein), in `controls_manifests.json` gemerkt (`games: {"<art>:<appid>": pfad}`) und gewinnt danach immer. Hat das Spiel keinen Ordner, wird der Ordner der Datei genommen (für xrizer-/OpenComposite-Dateien). „✕“ vergisst die Wahl und sucht neu.
+* **Hinweis bei fehlender Datei** sagt jetzt, wo gesucht wurde, und dass Spiele mit OpenXR direkt keine Action-Datei haben — dort kommt die Belegung aus dem Spiel, obah/xrizer greifen nicht.
+* **Kennzeichnung:** „· Nicht-Steam“ bzw. „· ohne Steam“ hinter dem Namen; der Tooltip zeigt den Ordner.
+* **Neu: `games.games_tab_entries()`, `obah_bindings.library_folder()`, `ObahGame.kind` / `has_manifest` / `key`.** Das Dropdown merkt sich die Auswahl über `key` statt über den Ordner (Spiele ohne Ordner).
+* **Tests:** `test_obah_bindings.py` und `test_obah_aux.py` erweitert.
+
+#### 🇬🇧 English
+
+**Controls: points sit on the new controller images**
+
+* **New images for Touch, Index (Knuckles), Vive Wand, Vive Focus 3 and Gamepad.** The points (and lines) missed their buttons: they came from obah's profile coordinates while the image was fitted into an area with a different aspect ratio.
+* **New: `assets/controls/points.json`.** Pixel position of every input per image. Left and right images have their own points — the right ones aren't exact mirrors.
+* **An image with points keeps its own aspect ratio.** Transparent borders are cropped, the image is shown at most 330 × 380 px. Cards are sorted by the height of the image points so lines don't cross.
+* **Custom images still work.** `points.json` is looked up next to the image, so also in `~/.config/yakuda-connect/controls/`. Without an entry, or if the aspect ratio doesn't match, the old method applies.
+* **obah's profile points in `core/obah_editor.py` restored.** They had been converted to the old Touch image locally and no longer matched the built-in drawing.
+* **Images are cached per side.** Previously every load cleared the cache, so left and right reloaded each other from disk on every repaint.
+
+**Controls: controllers same size, lines on top, wall in the middle**
+
+* **Images cropped in pairs.** Touch, Focus 3, Index and Vive: transparent borders removed, left and right on the same canvas, controller aligned towards the middle; `points.json` recalculated. The app no longer crops by itself, so both sides are always exactly the same size.
+* **Lines run over the controller** instead of vanishing underneath.
+* **The controller stays inside its box** — dragging stops at the middle and the other edges.
+* **Both sides move mirrored.** Dragging one controller moves the other one mirror-wise; both are remembered.
+* **Both controllers at the same height.** Each used to be centred on its own card column, so the side with more or longer cards sat lower. Side by side, the taller column now counts for both; older per-side offsets are aligned on load (left leads).
+* **Second card column for sorting.** Drag a card far outwards to put it in an outer column; drag it back to return it. In the outer column every card stays at the height where you drop it — no stacking from the top, and nothing overlaps. Nothing jumps during the drag; the box makes room after release. Stored in the layout (`outer`), profiles included.
+* **The mouse wheel no longer changes dropdowns.** Scrolling over a combo keeps scrolling the page instead of silently switching game, controller or source — app-wide (new: `ui/no_wheel.py`).
+* **Just a thin line in the middle** instead of a 24 px gap.
+
+**Controls: every game from the Games tab in the game picker**
+
+* **① Game now lists every game from the Games tab** — tested, untested, non-Steam and your own entries — plus all Steam games with an action file (as before).
+* **Folder of non-Steam games:** the Steam entry's start folder, otherwise the program's folder. Home, `/`, `/usr/bin` etc. are never searched (Heroic/Lutris launchers), and the search stops after 4000 folders.
+* **Games without an action file are greyed out** ("no action file"); controller and source are locked and the hint says where it looked. Without `actions.json` there are no actions to bind — normal for games using OpenXR directly.
+* **More thorough action-file search.** Besides obah's four names, `steamvr_manifest.json` counts (Unreal's SteamVR Input plugin) — only if it really contains an `actions` list. If the game folder has nothing, the Proton prefix is searched too (AppData/Local, LocalLow, Roaming, Documents, Saved Games; at most 8000 folders).
+* **Pick the action file yourself:** "📂 Action file …" button next to ① Game. The file is validated, remembered in `controls_manifests.json` and always wins afterwards. "✕" forgets it and searches again.
+* **Missing-file hint** now says where it looked, and that games using OpenXR directly have no action file — their controls come from the game, obah/xrizer don't apply.
+* **Labels:** "· non-Steam" or "· without Steam" after the name; the tooltip shows the folder.
+* **New: `games.games_tab_entries()`, `obah_bindings.library_folder()`, `ObahGame.kind` / `has_manifest` / `key`.**
+* **Tests:** extended `test_obah_bindings.py` and `test_obah_aux.py`.
+
 ### 🚀 v1.3.1 — 2026-09-19
 
 #### 🇩🇪 Deutsch

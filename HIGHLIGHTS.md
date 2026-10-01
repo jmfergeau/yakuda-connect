@@ -1,5 +1,152 @@
 # Highlights - Yakuda Connect
 
+### 🚀 v1.3.9 — 2026-09-29
+
+#### 🇩🇪 Deutsch
+
+* **appiamge fix berehtigung**
+
+#### 🇬🇧 English
+
+* **appiamge fix permissions**.
+
+
+---
+
+### 🚀 v1.3.8 — 2026-09-26
+
+#### 🇩🇪 Deutsch
+
+* **Kein doppelter Start mehr bei Autostart-Profilen.** Du kannst mehrere Profile für dasselbe Spiel anlegen (z. B. zwei VRChat-Setups), aber es ist immer nur eins aktiv. Schaltest du bei einem den Timer ein, gehen die anderen für dieses Spiel automatisch aus – so startet z. B. DCB nie mehr zweimal.
+
+#### 🇬🇧 English
+
+* **No more double starts with autostart profiles.** You can create several profiles for the same game (e.g. two VRChat setups), but only one is ever active. Turning on the timer of one turns the others for that game off automatically – so DCB, for example, never starts twice.
+
+---
+
+### 🚀 v1.3.7 — 2026-09-24
+
+#### 🇩🇪 Deutsch
+
+* **OpenXR-Vorlage mit einem Klick.** Zeigt ein OpenXR-Spiel im Controls-Tab überall „nichts belegt“ (z. B. VRChat), belegt „🧩 OpenXR-Vorlage verwenden“ die Tasten mit einer üblichen Standardbelegung: Trigger, Griff, Sticks, A/B/X/Y und Menü. Du prüfst, speicherst – oder verwirfst sie wieder.
+* **Sicherere Releases.** Die Versionsprüfung schaut jetzt auch auf AUR-`.SRCINFO`, README-Badge, Changelog und Highlights – eine vergessene Stelle fällt sofort auf.
+* **Übersicht für Mitwirkende.** Die neue `ARCHITEKTUR.md` zeigt, welcher Tab seine Logik in welcher Datei hat.
+
+#### 🇬🇧 English
+
+* **OpenXR template in one click.** If an OpenXR game shows “nothing bound” everywhere in the Controls tab (e.g. VRChat), “🧩 Use OpenXR template” fills in a common default layout: trigger, grip, sticks, A/B/X/Y and menu. You check it, save it – or discard it again.
+* **Safer releases.** The version check now also covers the AUR `.SRCINFO`, the README badge, changelog and highlights – a forgotten spot shows up right away.
+* **Overview for contributors.** The new `ARCHITEKTUR.md` shows which tab keeps its logic in which file.
+
+---
+
+### 🚀 v1.3.6 — 2026-09-23
+
+#### 🇩🇪 Deutsch
+
+* **Autostart-Profile.** Im Streaming-Tab legst du Profile an: „Wenn VRChat läuft und die Brille auf ist, starte VRCX und meine OSC-Tools“ – und wenn das Spiel zu ist, gehen sie wieder zu. Das Spiel wählst du einfach aus deiner Games-Liste.
+* **Schonend für dein Spiel.** Die Programme starten auf Wunsch nacheinander statt alle auf einmal, und die Überwachung braucht praktisch keine Leistung. Ein Schalter schaltet die Automatik komplett an oder aus.
+* **Große Knöpfe fürs Headset.** „▶ Programme starten“ und „■ Programme stoppen“ triffst du auch mit dem Controller in WayVR ganz leicht. Ein grüner Punkt zeigt, welches Profil gerade läuft.
+* **Aufgeräumtes Dashboard.** Der normale Autostart bleibt auf dem Dashboard – Programme fügst du jetzt mit „+ Programm“ hinzu und entfernst sie mit ✕.
+* **Auch ohne Fenster.** Die Profile funktionieren im Terminal-Modus genauso.
+* **Sprache in den Einstellungen.** Die Sprachauswahl findest du jetzt unter Einstellungen → Allgemein – und neue Sprachen tauchen dort automatisch auf.
+* **Steam Deck / Flatpak (Test).** Yakuda Connect erkennt SteamOS und WiVRn als Flatpak, installiert ohne Passwort und startet den Server richtig. Noch nicht auf einem echten Deck getestet – Rückmeldung willkommen!
+
+#### 🇬🇧 English
+
+* **Autostart profiles.** In the Streaming tab you create profiles: “When VRChat runs and my headset is on, start VRCX and my OSC tools” – and when the game closes, they close too. You simply pick the game from your Games list.
+* **Easy on your game.** Programs can start one after another instead of all at once, and watching costs practically nothing. One switch turns the automation fully on or off.
+* **Big buttons for the headset.** “▶ Start programs” and “■ Stop programs” are easy to hit with the controller in WayVR. A green dot shows which profile is running.
+* **Tidier dashboard.** The normal autostart stays on the dashboard – add programs with “+ Program” and remove them with ✕.
+* **Works without the window too.** Profiles work the same in terminal mode.
+* **Language in Settings.** The language picker now lives in Settings → General – and new languages show up there automatically.
+* **Steam Deck / Flatpak (test).** Yakuda Connect detects SteamOS and WiVRn as a Flatpak, installs without a password and starts the server correctly. Not yet tested on a real Deck – feedback welcome!
+
+---
+
+### 🚀 v1.3.5 — 2026-09-23
+
+#### 🇩🇪 Deutsch
+
+* **Terminal-Modus – Yakuda Connect ohne Oberfläche.** Spart RAM unter VR: `YC-wivrn-toggle` schaltet den Server an/aus, `YC-openvr`, `YC-encoder` und `YC-GPU` wählen per Nummer, `YC-status` zeigt alles auf einen Blick, `YC-help` erklärt den Rest.
+* **Autostart und Kopplung auch im Terminal.** Deine Autostart-Programme starten, sobald das Headset verbunden ist. `YC-killapps` schließt sie, `YC-autostart-reset` setzt den Start-Timer zurück, und `YC-pairing` zeigt dir die PIN zum Koppeln.
+* **Passt zu deiner Installation.** Mit AUR und dem curl-Installer sind die Befehle sofort da. Bei AppImage oder Quellcode richtet sie Einstellungen → Erweitert → „Befehle einrichten“ ein.
+* **Ein Klick ins Terminal.** „Im Terminal starten“ öffnet das Menü und schließt die Oberfläche – der WiVRn-Server läuft einfach weiter.
+* **AppImage aktualisiert sich sparsam.** Mit AppImageUpdate, AppImageLauncher, AppManager oder AM lädt ein Update nur noch die Änderungen statt der ganzen Datei.
+
+#### 🇬🇧 English
+
+* **Terminal mode – Yakuda Connect without the GUI.** Saves RAM in VR: `YC-wivrn-toggle` turns the server on/off, `YC-openvr`, `YC-encoder` and `YC-GPU` pick by number, `YC-status` shows everything at a glance, `YC-help` explains the rest.
+* **Autostart and pairing in the terminal too.** Your autostart programs start as soon as the headset connects. `YC-killapps` closes them, `YC-autostart-reset` resets the start timer, and `YC-pairing` shows you the PIN for pairing.
+* **Fits how you installed.** With AUR and the curl installer the commands are there right away. For AppImage or source, Settings → Advanced → “Set up commands” sets them up.
+* **One click to the terminal.** “Start in terminal” opens the menu and closes the GUI – the WiVRn server just keeps running.
+* **AppImage updates use less data.** With AppImageUpdate, AppImageLauncher, AppManager or AM an update only downloads the changes instead of the whole file.
+
+---
+
+### 🚀 v1.3.4 — 2026-09-22
+
+#### 🇩🇪 Deutsch
+
+* **Schneller und leichter.** Yakuda Connect startet rund 3 Sekunden schneller, friert beim Start nicht mehr ein und belastet das System im Betrieb weniger – wichtig, wenn nebenbei VR läuft. Dein gewähltes Design bleibt jetzt auch nach einem Neustart erhalten.
+* **Alte SteamVR-Spiele ohne Action-Datei umbelegen.** Spiele wie Gal*Gun 2, bei denen es nichts zum Bearbeiten gibt, lassen sich jetzt über xrizer und xrBinder umbelegen – ohne Community-Bindings.
+* **Stick kippen statt drücken.** Für Funktionen auf „Stick drücken“ gibt es im Dialog „⇄ Kippen“: dann reicht schon das Kippen – praktisch für Menüs und Snap-Turn in älteren Spielen.
+* **Deadzone gegen Stick-Drift.** Stick anklicken → Tab „◎ Deadzone“ mit Reglern für Links, Rechts und Beide: Läuft oder dreht sich deine Figur von selbst, einfach hochdrehen.
+* **Stick-Drücken funktioniert wirklich.** Verschieben und Kippen kamen im Spiel bisher nie an (falscher Pfad für beide Hände) – behoben, deine Belegungen werden beim Start automatisch repariert.
+
+#### 🇬🇧 English
+
+* **Faster and lighter.** Yakuda Connect starts about 3 seconds faster, no longer freezes at startup and puts less load on your system while running – important with VR going on. Your chosen design now also survives a restart.
+* **Remap old SteamVR games without an action file.** Games like Gal*Gun 2, which have nothing to edit, can now be remapped via xrizer and xrBinder – no community bindings needed.
+* **Tilt the stick instead of clicking.** Functions on “stick press” get a “⇄ Tilt” option in the dialog: just tilting is enough – handy for menus and snap turn in older games.
+* **Deadzone against stick drift.** Click the stick → “◎ Deadzone” tab with sliders for left, right and both: if your character walks or turns on its own, just turn it up.
+* **Stick remaps actually work.** Moving and tilt never reached the game (wrong path for both hands) – fixed, your bindings are repaired automatically at startup.
+
+---
+
+### 🚀 v1.3.3 — 2026-09-21
+
+#### 🇩🇪 Deutsch
+
+* **OpenXR-Spiele umbelegen – genau wie OpenVR-Spiele.** Spiele ohne SteamVR-Bindings (z. B. viele Unreal-Spiele unter Proton wie Wanderer) stehen jetzt mit „· OpenXR“ in derselben Spieleliste und bekommen dieselbe Controller-Ansicht. Im Hintergrund arbeitet [xrBinder](https://gitlab.com/mittorn/xrBinder) von mittorn.
+* **Ein Schalter richtet alles ein.** Die neue Karte „xrBinder“ oben im Controls-Tab baut und aktiviert xrBinder. Danach das Spiel einmal starten – es taucht von selbst in der Liste auf.
+* **Taste anklicken, Funktion zuweisen.** Der Dialog zeigt nur die Funktionen deines Controllers; alles für andere Controller steht unten in einem eigenen Menü. „✕“ nimmt eine Funktion weg, „↪“ zeigt, was verschoben wurde.
+* **Zurück auf Standard.** Pro Taste im Dialog oder alles auf einmal mit „↺ Alles auf Standard“.
+* **Live, wo es geht.** Läuft das Spiel, kommt die neue Belegung nach „Speichern“ sofort an – sonst beim nächsten Start.
+* **Aufgeräumte Spieleliste.** Oben OpenVR-Spiele, dann OpenXR-Spiele, ganz unten die ohne Action-Datei.
+* **Die App sagt dir, was fehlt.** Ist obah oder xrBinder nicht installiert oder aus, steht das oben im Bereich – mit Knopf zum Installieren bzw. Einschalten.
+
+#### 🇬🇧 English
+
+* **Remap OpenXR games – just like OpenVR games.** Games without SteamVR bindings (e.g. many Unreal games under Proton such as Wanderer) now appear with “· OpenXR” in the same game list and get the same controller view. [xrBinder](https://gitlab.com/mittorn/xrBinder) by mittorn does the work in the background.
+* **One switch sets everything up.** The new “xrBinder” card at the top of the Controls tab builds and enables xrBinder. Then start the game once – it shows up in the list by itself.
+* **Click a button, assign a function.** The dialog only lists functions of your controller; everything meant for other controllers sits at the bottom in its own menu. “✕” removes a function, “↪” shows what was moved.
+* **Back to default.** Per button in the dialog, or everything at once with “↺ All to default”.
+* **Live where possible.** If the game is running, the new layout arrives right after “Save” – otherwise on the next start.
+* **Tidier game list.** OpenVR games first, then OpenXR games, games without an action file at the bottom.
+* **The app tells you what's missing.** If obah or xrBinder isn't installed or is switched off, the section says so at the top – with a button to install or switch it on.
+
+### 🚀 v1.3.2 — 2026-09-21
+
+#### 🇩🇪 Deutsch
+
+* **Neue Controller-Bilder, Linien treffen die Tasten.** Touch, Index, Vive, Focus 3 und Gamepad haben neue Bilder, und jeder Punkt sitzt jetzt genau auf seiner Taste.
+* **Action-Datei selbst wählen.** Findet die App keine, suchst du sie mit „📂 Action-Datei …“ aus – sie wird gemerkt. Gesucht wird jetzt auch nach Unreal-Dateien und im Proton-Prefix.
+* **Controller sauber nebeneinander.** Links und rechts sind gleich groß und bewegen sich gespiegelt, die Linien liegen obendrauf, und in der Mitte hält eine dünne Linie die Controller auf ihrer Seite.
+* **Karten in zwei Spalten.** Zieh eine Karte weit nach außen, und sie bekommt ihre eigene Spalte – auf jeder Höhe, die du willst.
+* **Scrollen stellt nichts mehr um.** Das Mausrad über einer Aufklappliste scrollt die Seite statt die Auswahl zu ändern.
+* **Alle deine Spiele im Controls-Tab.** Die Spielauswahl zeigt jedes Spiel aus dem Games-Tab – auch Nicht-Steam-Spiele und eigene Einträge. Hat ein Spiel keine OpenVR-Action-Datei, steht es grau da und die App sagt dir, warum.
+
+#### 🇬🇧 English
+
+* **New controller images, lines hit the buttons.** Touch, Index, Vive, Focus 3 and Gamepad have new images, and every point now sits right on its button.
+* **Pick the action file yourself.** If the app finds none, choose it with "📂 Action file …" — it's remembered. The search now also covers Unreal files and the Proton prefix.
+* **Controllers neatly side by side.** Left and right are the same size and move mirror-wise, lines sit on top, and a thin line in the middle keeps each controller on its side.
+* **Cards in two columns.** Drag a card far outwards and it gets its own column — at any height you like.
+* **Scrolling changes nothing.** The mouse wheel over a dropdown scrolls the page instead of changing the selection.
+* **All your games in the Controls tab.** The game picker lists every game from the Games tab — non-Steam games and your own entries included. If a game has no OpenVR action file, it's greyed out and the app tells you why.
+
 ### 🚀 v1.3.1 — 2026-09-19
 
 #### 🇩🇪 Deutsch
